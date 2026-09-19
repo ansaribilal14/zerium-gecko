@@ -73,6 +73,9 @@ public class ExtensionsActivity extends AppCompatActivity {
     private RecyclerView list;
     private RowAdapter adapter;
     private final List<Object> rows = new ArrayList<>();
+    /** Method-reference equality needs a stable instance; this::refresh in
+     *  a comparison expression is a compile error. */
+    private final Runnable refreshHook = this::refresh;
 
     private final ActivityResultLauncher<Intent> filePicker =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),
@@ -99,7 +102,7 @@ public class ExtensionsActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        MainActivity.addonListRefresh = this::refresh;
+        MainActivity.addonListRefresh = refreshHook;
         refresh();
     }
 
@@ -112,7 +115,7 @@ public class ExtensionsActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (MainActivity.addonListRefresh == this::refresh) {
+        if (MainActivity.addonListRefresh == refreshHook) {
             MainActivity.addonListRefresh = null;
         }
         io.shutdown();
@@ -213,7 +216,7 @@ public class ExtensionsActivity extends AppCompatActivity {
         });
     }
 
-    private void install(String url, String name, @InstallationMethod String method) {
+    private void install(String url, String name, String method) {
         GeckoRuntimeHolder h = runtime();
         if (h == null) return;
         try {
@@ -248,14 +251,14 @@ public class ExtensionsActivity extends AppCompatActivity {
         if (!(err instanceof WebExtension.InstallException)) {
             return getString(R.string.addons_err_generic);
         }
-        switch (((WebExtension.InstallException) err).errorCode) {
-            case WebExtension.InstallException.ERROR_NETWORK_FAILURE:
+        switch (((WebExtension.InstallException) err).code) {
+            case WebExtension.InstallException.ErrorCodes.ERROR_NETWORK_FAILURE:
                 return getString(R.string.addons_err_network);
-            case WebExtension.InstallException.ERROR_CORRUPT_FILE:
+            case WebExtension.InstallException.ErrorCodes.ERROR_CORRUPT_FILE:
                 return getString(R.string.addons_err_corrupt);
-            case WebExtension.InstallException.ERROR_SIGNEDSTATE_REQUIRED:
+            case WebExtension.InstallException.ErrorCodes.ERROR_SIGNEDSTATE_REQUIRED:
                 return getString(R.string.addons_err_unsigned);
-            case WebExtension.InstallException.ERROR_BLOCKLISTED:
+            case WebExtension.InstallException.ErrorCodes.ERROR_BLOCKLISTED:
                 return getString(R.string.addons_err_blocklisted);
             default:
                 return getString(R.string.addons_err_generic);
