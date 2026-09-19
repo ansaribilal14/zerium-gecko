@@ -42,18 +42,18 @@ Both apps keep the same honest-scope discipline: everything documented here is i
 - **Custom search engines, text size, content language** — JSON-defined engines beside the six built-ins; 85–150% text scaling; content-language override.
 - **Bookmarks & history, start page tiles and block stats** — local SQLite only; most-visited tiles and the lifetime block counter on the start page.
 - **Material 3 soft UI** — the same tonal, rounded design language as the WebView edition, with Material You dynamic color on Android 12+.
-- **Add-ons (WebExtensions)** — install Mozilla-signed extensions from a curated AMO catalog or a local `.xpi`; manage enable/disable, private-mode access and uninstall per add-on; install-time permission prompts with explicit permission lists. The engine's WebExtensions platform means the broad Firefox add-on ecosystem runs in-app (the shared `chrome.*` extension namespace means most Chrome extensions that avoid Chrome-only APIs work when packaged as signed Firefox add-ons).
+- **Add-ons (WebExtensions)** — install Mozilla-signed extensions from a curated AMO catalog or a local `.xpi`; manage enable/disable, private-mode access and uninstall per add-on; install-time permission prompts with explicit permission lists; add-on **action popups** render in the toolbar (a puzzle-piece button appears when the active tab has add-on actions, listing them with live badges and opening each add-on's popup UI in an anchored window). The engine's WebExtensions platform means the broad Firefox add-on ecosystem runs in-app (the shared `chrome.*` extension namespace means most Chrome extensions that avoid Chrome-only APIs work when packaged as signed Firefox add-ons).
 - **Brave-style menu and start page** — a sectioned bottom-sheet menu with a circular quick-action row, a Privacy Stats card on the start page (Trackers & Ads Blocked / Est. Data Saved / Est. Time Saved — Brave's conservative ≈50 KB + ≈50 ms per-block formula, computed on-device), favicon tiles with monogram fallback, DuckDuckGo suggestions on the start-page search box only, "Search your tabs" filtering in the tab switcher, and a Delete-browsing-data dialog backed by the engine `StorageController`.
 - **HTTPS-only mode** — off / private tabs only / all tabs, applied live through the engine.
 
-## Honest limitations (v1.2.0)
+## Honest limitations (v1.3.0)
 
 The v1.0.0 list (denied permission prompts, no printing/PDF, no reader view, no autofill wiring, hosts-only blocking, no YouTube layer) and the v1.1.0 list (same, after the resolution release) are **fully resolved**. What remains honest to state:
 
 - The filter engine is an **Adblock-syntax subset**, not the full uBlock DSL: regex and wildcard filters, `$popup`, `$csp`, `$redirect`, `$removeparam`, procedural selectors (`:has-text`, `:-abp-…`) and domain-scoped element hiding are dropped by the generator instead of approximated — see `docs/BLOCKING.md`.
 - SSAP server-stitched YouTube mid-rolls are part of the media stream itself; no client-side blocker can remove them. The confirmed-ad watchdog fast-forwards through them (same honest boundary as the WebView edition).
 - **Add-ons must be Mozilla-signed** — the Gecko engine enforces signature validation and it cannot be turned off by an embedder: the catalog therefore points at AMO-hosted packages, locally picked files must be signed `.xpi` Firefox add-ons, and raw Chrome `.crx` or unsigned developer builds are rejected with an explicit message.
-- **Add-on action popups** (toolbar popup UIs, e.g. Dark Reader's controls) are supported by the engine but are not rendered in Zerium G's toolbar yet; the add-ons themselves run and apply their rules. Tracked on the roadmap.
+- **Add-on action popups** render in an anchored toolbar window since v1.3.0; one embedding boundary remains: links inside a popup that force a new-tab open are dropped (the popup session has no tab delegate).
 - Reader view parses the DOM snapshot at load: paywalled or JS-gated content yields what is actually in the DOM.
 - Reader-mode renders live in the app cache as a single HTML file and are deleted on exit; a crash between open and exit could leave one behind (app-private storage).
 - datetime-local / month / week form prompts are dismissed rather than approximated with a different control.

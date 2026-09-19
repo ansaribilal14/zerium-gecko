@@ -2,6 +2,18 @@
 
 All notable changes to Zerium G are documented in this file (Keep a Changelog format). Stable builds are published as immutable `vX.Y.Z` releases; the rolling `latest` tag tracks the newest successful build of `main`.
 
+## [1.3.0] — 2026-09-20
+
+Add-on action popups — the toolbar gap noted in v1.2.0's honest-scope section is closed.
+
+### Added
+- **Add-on action popups in the toolbar** — a puzzle-piece button appears in the top bar whenever the active tab has visible browser/page actions from installed add-ons (e.g. uBlock Origin's block counts, Dark Reader's controls). Tapping it opens an anchored list of those actions with their live badges (colored with the add-on's own badge colors); tapping a row triggers the action. When the action defines a popup, the add-on's popup UI renders in a rounded, anchored window built on a dedicated popup session — created, opened and closed by the app exactly per the GeckoView contract (the engine marks the session as an extension popup and loads the popup URI into it; dismissing the window closes the session, and `window.close()` from the popup dismisses the window).
+- Action state is tracked both engine-wide (default actions) and per-tab (session overrides, the way page actions appear/disappear per site), so the button reflects the tab you are actually on. The popup session inherits the active tab's private mode and the global JavaScript setting; Enhanced Tracking Protection stays on.
+
+### Honest scope
+- The action list and popups work for add-ons that declare a `browser_action`/`page_action`. Add-ons without actions are unaffected and keep running their background/content logic as before. The built-in Zerium G Shield defines no action and adds no toolbar button.
+- Popups render in a plain anchored window: links inside a popup that force a new-tab open are dropped (the popup session has no tab delegate), matching the minimal-popup contract of GeckoView embedding; desktop Firefox behaves similarly inside panels.
+
 ## [1.2.0] — 2026-09-19
 
 Brave-inspired UI overhaul, an add-on platform, and a stronger engine-level YouTube blocker.

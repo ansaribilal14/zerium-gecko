@@ -61,7 +61,7 @@ import java.util.List;
  * (webRequest + cosmetic CSS), strict Enhanced Tracking Protection, true
  * private sessions, and per-session JavaScript / desktop-site switches.
  */
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements ExtActionSupport.Host {
 
     static final String HOME_URL = "about:home";
     private static final String EXTENSION_LOCATION = "resource://android/assets/extension/";
@@ -104,7 +104,7 @@ public class MainActivity extends AppCompatActivity {
     private GSwipeLayout swipe;
     private FrameLayout webContainer;
     private EditText omnibox;
-    private ImageButton btnSecurity, btnRefresh, btnBack, btnForward, btnHome;
+    private ImageButton btnSecurity, btnRefresh, btnBack, btnForward, btnHome, btnExtensions;
     private TextView btnTabs;
     private ProgressBar progress;
     private LinearLayout topBar, bottomBar, findBar;
@@ -118,6 +118,7 @@ public class MainActivity extends AppCompatActivity {
     private FrameLayout fullscreenContainer;
     private View fullscreenView;
     private GeckoSession fullscreenSession;
+    private ExtActionSupport extActions;
 
     /** Pending Android runtime-permission request (gecko callback or media grant). */
     private GeckoSession.PermissionDelegate.Callback pendingAndroidCallback;
@@ -178,6 +179,10 @@ public class MainActivity extends AppCompatActivity {
 
         createRuntime();
 
+        // Add-on toolbar actions (browser/page action popups).
+        extActions = new ExtActionSupport(this, runtime, this);
+        extActions.refresh();
+
         // Pull-to-refresh: gated by the session's real scroll position.
         swipe.setOnRefreshListener(() -> {
             swipe.setRefreshing(false);
@@ -209,6 +214,8 @@ public class MainActivity extends AppCompatActivity {
             Tab t = tabs.currentTab();
             if (t != null && !isStartPage(t)) t.session.reload();
         });
+        btnExtensions = findViewById(R.id.btnExtensions);
+        btnExtensions.setOnClickListener(this::onExtensionsClicked);
         btnBack.setOnClickListener(v -> {
             Tab t = tabs.currentTab();
             if (t != null && t.canGoBack) t.session.goBack();
@@ -462,6 +469,7 @@ public class MainActivity extends AppCompatActivity {
     private void notifyAddonListChanged() {
         Runnable r = addonListRefresh;
         if (r != null) runOnUiThread(r);
+        if (extActions != null) extActions.refresh();
     }
 
     /** Install-time permission dialog: permission list + private-mode grant. */
@@ -623,6 +631,7 @@ public class MainActivity extends AppCompatActivity {
         webContainer.addView(view);
         session.open(runtime);
         view.setSession(session);
+        if (extActions != null) extActions.attachSession(session);
 
         Tab tab = tabs.add(new Tab(tabs.count() + System.identityHashCode(session), session, view, incognito));
         setupSession(tab);
@@ -656,6 +665,7 @@ public class MainActivity extends AppCompatActivity {
         webContainer.removeView(tab.view);
         tabs.remove(tab);
         tab.destroy();
+        if (extActions != null) extActions.detachSession(tab.session);
         if (tabs.count() == 0) {
             openTab(null, false);
             tabsAdapter.notifyDataSetChanged();
@@ -1915,6 +1925,8 @@ public class MainActivity extends AppCompatActivity {
         btnTabs.setText(n > 99 ? "99+" : String.valueOf(n));
         // Refresh gesture only on real pages the user can reload.
         swipe.setEnabled(prefs.pullToRefresh() && !isStartPage(tab));
+        // Add-on action availability depends on the active tab.
+        if (extActions != null) extActions.syncToolbar();
     }
 
     private static String displayUrl(String url) {
@@ -1942,9 +1954,45 @@ public class MainActivity extends AppCompatActivity {
         if (url != null) loadInTab(t, url);
     }
 
+    // ---------- Add-on toolbar actions ----------
+
+    private void onExtensionsClicked(View anchor) {
+        if (extActions != null) extActions.showActionList(anchor);
+    }
+
+    @Override
+    public GeckoSession activeSession() {
+        Tab t = tabs.currentTab();
+        return t == null ? null : t.session;
+    }
+
+    @Override
+    public boolean activeIncognito() {
+        Tab t = tabs.currentTab();
+        return t != null && t.incognito;
+    }
+
+    @Override
+    public boolean jsEnabled() {
+        return prefs.javascriptEnabled();
+    }
+
+    @Override
+    public void setExtensionsVisible(boolean visible) {
+        if (btnExtensions != null) {
+            btnExtensions.setVisibility(visible ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    @Override
+    public View extensionsAnchor() {
+        return btnExtensions;
+    }
+
     // ---------- Menu ----------
 
     private void showMenu(View anchor) {
+        if (extActions != null) extActions.dismissAll();
         Tab t = tabs.currentTab();
         boolean onPage = t != null && !isStartPage(t);
         java.util.List<MenuSheet.Entry> entries = new ArrayList<>();
@@ -2258,6 +2306,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void enterFullScreen(GeckoSession session) {
         if (fullscreenView != null) return;
+        if (extActions != null) extActions.dismissAll();
         fullscreenSession = session;
         fullscreenContainer.setVisibility(View.VISIBLE);
         webContainer.setVisibility(View.GONE);
@@ -2281,6 +2330,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void showTabSwitcher() {
         hideFindBar();
+        if (extActions != null) extActions.dismissAll();
         Tab current = tabs.currentTab();
         if (current != null && !current.incognito && !isStartPage(current)) capturePreview(current);
         tabSearch.setText("");
@@ -2387,6 +2437,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         deleteReaderFile();
+        if (extActions != null) extActions.teardown();
         runtimeForAddons = null;
         addonListRefresh = null;
     }
@@ -2398,6 +2449,8 @@ public class MainActivity extends AppCompatActivity {
         // cookie banners, the global JS default and the shield allowlist.
         applyRuntimeSettings();
         pushShieldConfig();
+        // Add-ons may have been installed or toggled on the Add-ons screen.
+        if (extActions != null) extActions.refresh();
         Tab t = tabs.currentTab();
         if (t != null) updateChrome(t);
     }

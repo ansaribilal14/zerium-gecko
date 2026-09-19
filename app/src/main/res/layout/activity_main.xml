@@ -58,6 +58,16 @@
                 app:tint="?attr/colorOnSurfaceVariant" />
 
             <ImageButton
+                android:id="@+id/btnExtensions"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/menu_addons"
+                android:src="@drawable/ic_extension"
+                android:visibility="gone"
+                app:tint="?attr/colorOnSurfaceVariant" />
+
+            <ImageButton
                 android:id="@+id/btnMenuTop"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
