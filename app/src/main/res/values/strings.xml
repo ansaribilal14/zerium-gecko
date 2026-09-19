@@ -82,6 +82,7 @@
     </string-array>
     <string name="allowlist">Site allowlist</string>
     <string name="allowlist_title">Site allowlist</string>
+    <string name="allowlist_hint">One domain per line, e.g. example.com</string>
     <string name="allowlist_message">One domain per line. Sites on this list are exempt from engine-level blocking.</string>
     <string name="clear_history">Clear browsing history</string>
     <string name="clear_history_title">Clear all browsing history?</string>
