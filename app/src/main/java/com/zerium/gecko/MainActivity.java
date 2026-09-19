@@ -529,7 +529,8 @@ public class MainActivity extends AppCompatActivity {
                                                    @NonNull WebRequestError error) {
                 if (uri == null || uri.isEmpty()) return GeckoResult.fromValue(null);
                 String page = errorHtml(uri, error.category, error.code);
-                String dataUri = GeckoSession.Loader.createDataUri(page, "text/html");
+                String dataUri = GeckoSession.Loader.createDataUri(
+                        page.getBytes(java.nio.charset.StandardCharsets.UTF_8), "text/html");
                 return GeckoResult.fromValue(dataUri);
             }
         });
@@ -911,7 +912,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void showContextMenu(Tab tab, GeckoSession.ContentDelegate.ContextElement element) {
         final String link = element.linkUri;
-        final String image = GeckoSession.ContentDelegate.ContextElement.TYPE_IMAGE.equals(element.type)
+        final String image = element.type
+                == GeckoSession.ContentDelegate.ContextElement.TYPE_IMAGE
                 ? element.srcUri : null;
         if ((link == null || link.isEmpty()) && (image == null || image.isEmpty())) return;
         final String target = link != null && !link.isEmpty() ? link : image;
