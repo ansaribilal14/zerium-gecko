@@ -1,0 +1,57 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.zerium.gecko'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.zerium.gecko"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    signingConfigs {
+        release {
+            def ksPath = System.getenv("KEYSTORE_FILE")
+            storeFile file(ksPath != null && !ksPath.isEmpty() ? ksPath : "release.keystore")
+            def sp = System.getenv("KEYSTORE_PASSWORD")
+            storePassword sp != null && !sp.isEmpty() ? sp : "zerium"
+            def al = System.getenv("KEY_ALIAS")
+            keyAlias al != null && !al.isEmpty() ? al : "zerium"
+            def kp = System.getenv("KEY_PASSWORD")
+            keyPassword kp != null && !kp.isEmpty() ? kp : "zerium"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}
+
+// Mozilla GeckoView 133 (Firefox 133) — pinned build timestamp.
+dependencies {
+    implementation 'org.mozilla.geckoview:geckoview:133.0.20241209150345'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.core:core:1.13.1'
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+}

@@ -1,0 +1,110 @@
+name: Build Zerium G
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build, sign and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history — required for tag-aware changelogs
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Prepare signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$GITHUB_WORKSPACE/release.keystore"
+            echo "Keystore decoded from repository secret."
+          else
+            keytool -genkeypair -v -keystore "$GITHUB_WORKSPACE/release.keystore" \
+              -storetype PKCS12 -alias zerium -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass zerium -keypass zerium \
+              -dname "CN=Zerium G, OU=Zerium, O=Zerium, C=US"
+            echo "WARNING: generated an ephemeral keystore. Set KEYSTORE_B64 for stable signatures."
+          fi
+
+      - name: Build APKs
+        env:
+          KEYSTORE_FILE: ${{ github.workspace }}/release.keystore
+          KEYSTORE_PASSWORD: zerium
+          KEY_ALIAS: zerium
+          KEY_PASSWORD: zerium
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace :app:assembleRelease :app:assembleDebug
+
+      - name: Organize artifacts
+        run: |
+          VER=$(grep -oP 'versionName "\K[^"]+' app/build.gradle)
+          echo "Building version ${VER}"
+          mkdir -p out
+          cp app/build/outputs/apk/release/app-release.apk "out/Zerium-G-v${VER}-release.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk     "out/Zerium-G-v${VER}-debug.apk"
+          ls -la out/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zerium-G-APKs
+          path: out/*.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Publish releases (rolling + stable, checksums, notes)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          PUBLISH: "1"
+        run: bash .github/scripts/publish_release.sh out
+
+      - name: Notify Telegram
+        if: always()
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          VER=$(grep -oP 'versionName "\K[^"]+' app/build.gradle)
+          SHA=$(git rev-parse --short HEAD)
+          REL="https://github.com/${GITHUB_REPOSITORY}/releases"
+          RUN="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ -z "$TG_TOKEN" ]; then
+            echo "Telegram secrets not set; skipping notification."
+            exit 0
+          fi
+          if [ "${{ job.status }}" = "success" ]; then
+            HEADLINE="build succeeded"
+          else
+            HEADLINE="build FAILED — no new artifacts"
+          fi
+          MSG="Zerium G v${VER} — ${HEADLINE}
+          Build #${GITHUB_RUN_NUMBER} · commit ${SHA}
+          Download: ${REL}/tag/latest
+          Releases: ${REL}
+          CI log: ${RUN}"
+          curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" --data-urlencode "text=${MSG}" > /dev/null || true

@@ -1,0 +1,23 @@
+{
+  "manifest_version": 2,
+  "name": "Zerium G Shield",
+  "version": "1.0.0",
+  "description": "Engine-level ad and tracker blocking for Zerium G: network request filtering plus cosmetic element hiding.",
+  "permissions": [
+    "webRequest",
+    "webRequestBlocking",
+    "downloads",
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": true
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "css": ["content/cosmetic.css"],
+      "run_at": "document_start"
+    }
+  ]
+}
