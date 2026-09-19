@@ -142,10 +142,10 @@ public class DownloadsActivity extends AppCompatActivity {
                         i.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
                         startActivity(i);
                     } catch (Exception e) {
-                        Toast.makeText(this, R.string.no_app_for_file, Toast.LENGTH_SHORT).show();
+                        Toast.makeText(DownloadsActivity.this, R.string.no_app_for_file, Toast.LENGTH_SHORT).show();
                     }
                 } else {
-                    Toast.makeText(this, R.string.downloads_legacy_hint, Toast.LENGTH_LONG).show();
+                    Toast.makeText(DownloadsActivity.this, R.string.downloads_legacy_hint, Toast.LENGTH_LONG).show();
                 }
             });
         }

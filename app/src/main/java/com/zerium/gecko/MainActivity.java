@@ -737,8 +737,7 @@ public class MainActivity extends AppCompatActivity {
                     @NonNull GeckoSession.PromptDelegate.BeforeUnloadPrompt prompt) {
                 new AlertDialog.Builder(MainActivity.this)
                         .setTitle(R.string.leave_page_title)
-                        .setMessage(prompt.message == null
-                                ? getString(R.string.leave_page_body) : prompt.message)
+                        .setMessage(R.string.leave_page_body)
                         .setPositiveButton(R.string.leave_page_stay,
                                 (d, w) -> prompt.confirm(AllowOrDeny.DENY))
                         .setNegativeButton(R.string.leave_page_go,
