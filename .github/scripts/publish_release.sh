@@ -131,12 +131,20 @@ fi
 
 export GH_TOKEN
 
-# --- Stable channel: immutable tag + release, only when the tag is new ------
+# --- Stable channel: immutable tag + release --------------------------------
+# Tag creation is conditional (CI owns the tag), but release creation is
+# idempotent: if a tag was pushed manually before the build finished, the
+# release is still published — a tag without a release must not silently
+# skip the stable channel.
 if ! git ls-remote --tags origin "refs/tags/v${VER}" | grep -q "refs/tags/v${VER}"; then
   git config user.name  "zerium-release-bot"
   git config user.email "release-bot@zerium.invalid"
   git tag -a "v${VER}" -m "Zerium G v${VER}" "$FULL_SHA"
   git push origin "v${VER}"
+fi
+if gh release view "v${VER}" --json id >/dev/null 2>&1; then
+  echo "Stable release v${VER} already exists — left unchanged."
+else
   gh release create "v${VER}" \
     "out/Zerium-G-v${VER}-release.apk" \
     "out/Zerium-G-v${VER}-debug.apk" \
@@ -144,8 +152,6 @@ if ! git ls-remote --tags origin "refs/tags/v${VER}" | grep -q "refs/tags/v${VER
     --title "Zerium G v${VER}" \
     --notes-file out/RELEASE-NOTES-STABLE.md
   echo "Published stable release v${VER}."
-else
-  echo "Tag v${VER} already exists — stable release left unchanged."
 fi
 
 # --- Rolling channel: recreate `latest` -------------------------------------
