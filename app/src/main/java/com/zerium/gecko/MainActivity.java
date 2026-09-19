@@ -529,8 +529,9 @@ public class MainActivity extends AppCompatActivity {
                                                    @NonNull WebRequestError error) {
                 if (uri == null || uri.isEmpty()) return GeckoResult.fromValue(null);
                 String page = errorHtml(uri, error.category, error.code);
-                String dataUri = GeckoSession.Loader.createDataUri(
-                        page.getBytes(java.nio.charset.StandardCharsets.UTF_8), "text/html");
+                String dataUri = "data:text/html;base64," + android.util.Base64
+                        .encodeToString(page.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                                android.util.Base64.NO_WRAP);
                 return GeckoResult.fromValue(dataUri);
             }
         });
