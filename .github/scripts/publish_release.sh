@@ -138,8 +138,8 @@ if ! git ls-remote --tags origin "refs/tags/v${VER}" | grep -q "refs/tags/v${VER
   git tag -a "v${VER}" -m "Zerium G v${VER}" "$FULL_SHA"
   git push origin "v${VER}"
   gh release create "v${VER}" \
-    "out/Zerium-v${VER}-release.apk" \
-    "out/Zerium-v${VER}-debug.apk" \
+    "out/Zerium-G-v${VER}-release.apk" \
+    "out/Zerium-G-v${VER}-debug.apk" \
     "out/SHA256SUMS.txt" \
     --title "Zerium G v${VER}" \
     --notes-file out/RELEASE-NOTES-STABLE.md
@@ -151,8 +151,8 @@ fi
 # --- Rolling channel: recreate `latest` -------------------------------------
 gh release delete latest --yes --cleanup-tag 2>/dev/null || true
 gh release create latest \
-  "out/Zerium-v${VER}-release.apk" \
-  "out/Zerium-v${VER}-debug.apk" \
+  "out/Zerium-G-v${VER}-release.apk" \
+  "out/Zerium-G-v${VER}-debug.apk" \
   "out/SHA256SUMS.txt" \
   --target "$FULL_SHA" \
   --title "Zerium G v${VER} — Rolling Release" \
