@@ -1,0 +1,53 @@
+name: Refresh blocking rules
+
+# Regenerates the shield's rules.json + cosmetic.css from upstream
+# filter-list sources every Monday and pushes the result to main (which
+# triggers the build workflow — the rolling `latest` channel picks the
+# fresh rules up automatically). Deterministic: no diff, no commit.
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: rules-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    name: Regenerate rules
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Zerium G
+        uses: actions/checkout@v4
+
+      - name: Checkout Zerium Browser (hosts + curated patterns source)
+        uses: actions/checkout@v4
+        with:
+          repository: ansaribilal14/zerium-browser
+          path: zerium-browser
+          ref: main
+
+      - name: Regenerate rules
+        env:
+          ZERIUM_GECKO: ${{ github.workspace }}
+          ZERIUM_REPO: ${{ github.workspace }}/zerium-browser
+        run: |
+          python3 scripts/gen_gecko_rules.py
+
+      - name: Commit if changed
+        run: |
+          git config user.name "zerium-rules-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app/src/main/assets/extension/blocklist/rules.json \
+                  app/src/main/assets/extension/content/cosmetic.css
+          if git diff --cached --quiet; then
+            echo "No rule changes this week."
+          else
+            git commit -m "chore(rules): weekly filter-list refresh"
+            git push
+          fi

@@ -53,6 +53,22 @@ public class HistoryDB extends SQLiteOpenHelper {
         return out;
     }
 
+    /** Most-visited hosts for the start page tiles (visit counts by host). */
+    public java.util.List<String> topHosts(int limit) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        try (Cursor c = getReadableDatabase().rawQuery(
+                "SELECT url, COUNT(*) AS n FROM history WHERE url LIKE 'http%' "
+                        + "GROUP BY url ORDER BY n DESC LIMIT ?",
+                new String[]{String.valueOf(limit * 5)})) {
+            while (c.moveToNext()) {
+                String host = Utils.hostOf(c.getString(0));
+                if (host != null && !out.contains(host)) out.add(host);
+                if (out.size() >= limit) break;
+            }
+        } catch (Exception ignored) {}
+        return out;
+    }
+
     public void clear() {
         getWritableDatabase().delete("history", null, null);
     }

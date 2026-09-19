@@ -1,18 +1,15 @@
 # Roadmap
 
-## v1.1 - near term
+## v1.1 (shipped)
 
-- Reader view (Mozilla Readability via a content-script channel).
-- Content-permission prompt UI (per-site allow for location/camera/microphone) behind the privacy-first default.
-- Password autofill via GeckoView's autocomplete/autofill delegates (no Zerium-side storage; delegate to system credential managers).
-- Custom search engines (same model as the WebView edition).
-- GeckoView session-state restore (`SessionState`) for in-history tab restoration across restarts.
+Everything listed below under "v1.1 - near term" landed in v1.1.0, together with printing, Save-as-PDF, popup blocking, cookie-banner auto-rejection, pull-to-refresh, edge-swipe gestures, an Adblock-syntax subset in the shield and the YouTube InnerTube pruning port. See `CHANGELOG.md`.
 
 ## v1.2 - blocking depth
 
-- Filter-list refresh channel for the shield (validated, atomic, same discipline as the WebView edition updater).
-- uBlock Origin-class filter syntax support (exception rules, `$domain=`, resource types) inside the shield.
-- Per-site cosmetic exceptions.
+- Filter-list refresh channel for the shield (validated, atomic, same discipline as the WebView edition updater) — in-app rule updates between releases.
+- Procedural cosmetic selectors (`:has-text`, `:-abp-…`) and domain-scoped element hiding.
+- Per-site cosmetic exceptions (`$generichide`/`$specifichide` honoring).
+- Reader font-size and typography controls in-app.
 
 ## v2.0 - differentiation
 

@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "Zerium G Shield",
-  "version": "1.0.0",
-  "description": "Engine-level ad and tracker blocking for Zerium G: network request filtering plus cosmetic element hiding.",
+  "version": "1.1.0",
+  "description": "Engine-level ad and tracker blocking for Zerium G: network request filtering with an Adblock-syntax subset, YouTube InnerTube pruning, cosmetic element hiding and reader-view extraction.",
   "permissions": [
     "webRequest",
     "webRequestBlocking",
@@ -15,9 +15,18 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "css": ["content/cosmetic.css"],
-      "run_at": "document_start"
+      "matches": ["*://*.youtube.com/*", "*://*.youtube-nocookie.com/*"],
+      "js": ["content/yt-inject.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content/readability.js", "content/reader.js"],
+      "run_at": "document_idle"
     }
+  ],
+  "web_accessible_resources": [
+    "page/yt-block.js"
   ]
 }

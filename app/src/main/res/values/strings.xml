@@ -29,6 +29,11 @@
     <string name="menu_block_info">Blocked on this page</string>
     <string name="menu_settings">Settings</string>
     <string name="menu_exit">Exit</string>
+    <string name="menu_downloads">Downloads</string>
+    <string name="menu_reader">Reader view</string>
+    <string name="menu_reader_exit">Leave reader view</string>
+    <string name="menu_print">Print…</string>
+    <string name="menu_save_pdf">Save as PDF</string>
 
     <!-- Feedback -->
     <string name="bookmark_added">Bookmark added</string>
@@ -53,6 +58,11 @@
     <string name="site_allowed">Blocking disabled for %1$s</string>
     <string name="empty_default">Nothing here yet</string>
     <string name="alert_dialog">This page says</string>
+    <string name="confirm_dialog">Confirm</string>
+    <string name="choose_dialog">Choose</string>
+    <string name="choose_color">Choose a color</string>
+    <string name="choose_file">Choose a file</string>
+    <string name="no_app_for_file">No app found to open this file</string>
 
     <!-- Dialogs -->
     <string name="ok">OK</string>
@@ -88,4 +98,74 @@
     <string name="clear_history_title">Clear all browsing history?</string>
     <string name="about">About Zerium G</string>
     <string name="about_body">Zerium G v%1$s\n\nThe GeckoView edition of the Zerium privacy browser: Mozilla Gecko engine, engine-level ad/tracker blocking, strict Enhanced Tracking Protection, true private tabs.\n\nGPL-3.0 open source. No accounts, no analytics, no telemetry.</string>
+
+    <!-- Reader / print / popups / permissions -->
+    <string name="reader_prefix">Reader:</string>
+    <string name="reader_unavailable">Reader view is not available for this page</string>
+    <string name="reader_opened">Reader view · %1$s</string>
+    <string name="print_failed">Could not render this page</string>
+    <string name="saving_pdf">Rendering page to PDF…</string>
+    <string name="pdf_saved">PDF saved: %1$s</string>
+    <string name="popup_title">Popup from %1$s</string>
+    <string name="popup_blocked">Popup blocked</string>
+    <string name="popup_block">Block</string>
+    <string name="popup_allow_once">Allow once</string>
+    <string name="popup_always_allow">Always allow %1$s</string>
+    <string name="perm_request_title">%1$s permission</string>
+    <string name="perm_request_body">%1$s wants to use %2$s.</string>
+    <string name="perm_allow">Allow</string>
+    <string name="perm_deny">Deny</string>
+    <string name="perm_always_allow">Always allow on this site</string>
+    <string name="perm_always_deny">Always deny on this site</string>
+    <string name="perm_location">Location</string>
+    <string name="perm_notifications">Notifications</string>
+    <string name="perm_storage">Persistent storage</string>
+    <string name="perm_drm">protected media (DRM)</string>
+    <string name="perm_storage_access">storage access</string>
+    <string name="perm_xr">virtual reality devices</string>
+    <string name="perm_generic">this feature</string>
+    <string name="perm_camera">camera</string>
+    <string name="perm_microphone">microphone</string>
+    <string name="perm_camera_mic">camera and microphone</string>
+    <string name="perm_media_title">Allow %1$s access?</string>
+    <string name="auth_title">Sign in</string>
+    <string name="auth_message">The site requires a username and password.</string>
+    <string name="auth_username">Username</string>
+    <string name="auth_password">Password</string>
+    <string name="leave_page_title">Leave this page?</string>
+    <string name="leave_page_body">Changes you made may not be saved.</string>
+    <string name="leave_page_stay">Stay on page</string>
+    <string name="leave_page_go">Leave</string>
+    <string name="repost_title">Resend form data?</string>
+    <string name="repost_body">To refresh the page, the browser will send the data again.</string>
+    <string name="repost_continue">Resend</string>
+
+    <!-- Settings additions -->
+    <string name="custom_engines">Custom search engines</string>
+    <string name="custom_engines_hint">JSON array, one engine per object:\n[{\"name\":\"SearXNG\",\"url\":\"https://searx.example/search?q=%s\"}]\n\n%s marks the search term. Invalid entries are rejected.</string>
+    <string name="custom_engines_invalid">No valid engine found — name, https URL with %s placeholder required</string>
+    <string name="cookie_banners">Reject cookie banners</string>
+    <string name="cookie_banners_sub">The engine auto-rejects cookie consent prompts where possible</string>
+    <string name="block_popups">Block popups</string>
+    <string name="block_popups_sub">Sites can be allowed once or permanently from the popup prompt</string>
+    <string name="site_permissions">Site permissions</string>
+    <string name="site_permissions_ask">Ask on every request · %1$d sites remembered</string>
+    <string name="site_permissions_deny">Deny silently · %1$d sites remembered</string>
+    <string name="perm_default_ask">Ask on every request</string>
+    <string name="perm_default_deny">Deny silently (privacy-first)</string>
+    <string name="perm_clear_memory">Forget remembered decisions (%1$d sites)</string>
+    <string name="autofill">Password autofill</string>
+    <string name="autofill_on">Provided by your password manager (platform autofill)</string>
+    <string name="autofill_off">Tap to choose a password manager in system settings</string>
+    <string name="text_size">Text size</string>
+    <string name="text_size_default">Default</string>
+    <string name="content_language">Content language</string>
+    <string name="gestures">Edge-swipe tab switching</string>
+    <string name="gestures_sub">Swipe from the left or right screen edge to change tabs</string>
+    <string name="pull_to_refresh">Pull to refresh</string>
+    <string name="pull_to_refresh_sub">Drag down at the top of a page to reload</string>
+
+    <!-- Downloads -->
+    <string name="downloads_empty">No downloads yet\nFiles you download appear here</string>
+    <string name="downloads_legacy_hint">Saved in the app\'s downloads folder</string>
 </resources>

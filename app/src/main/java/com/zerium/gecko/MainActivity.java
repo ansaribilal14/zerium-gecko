@@ -2,6 +2,7 @@ package com.zerium.gecko;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -28,6 +29,8 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
@@ -46,6 +49,7 @@ import org.mozilla.geckoview.GeckoView;
 import org.mozilla.geckoview.WebExtension;
 import org.mozilla.geckoview.WebRequestError;
 
+import java.io.File;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
@@ -69,15 +73,19 @@ public class MainActivity extends AppCompatActivity {
     private static final int MENU_BOOKMARK_ADD = 3;
     private static final int MENU_BOOKMARKS = 4;
     private static final int MENU_HISTORY = 5;
-    private static final int MENU_FIND = 6;
-    private static final int MENU_DESKTOP = 7;
-    private static final int MENU_JS = 8;
-    private static final int MENU_TRANSLATE = 9;
-    private static final int MENU_SHARE = 10;
-    private static final int MENU_ALLOW_SITE = 11;
-    private static final int MENU_BLOCK_INFO = 12;
-    private static final int MENU_SETTINGS = 13;
-    private static final int MENU_EXIT = 14;
+    private static final int MENU_DOWNLOADS = 6;
+    private static final int MENU_FIND = 7;
+    private static final int MENU_READER = 8;
+    private static final int MENU_DESKTOP = 9;
+    private static final int MENU_JS = 10;
+    private static final int MENU_TRANSLATE = 11;
+    private static final int MENU_PRINT = 12;
+    private static final int MENU_SAVE_PDF = 13;
+    private static final int MENU_SHARE = 14;
+    private static final int MENU_ALLOW_SITE = 15;
+    private static final int MENU_BLOCK_INFO = 16;
+    private static final int MENU_SETTINGS = 17;
+    private static final int MENU_EXIT = 18;
 
     private Prefs prefs;
     private GeckoRuntime runtime;
@@ -86,6 +94,7 @@ public class MainActivity extends AppCompatActivity {
     private BookmarksDB bookmarks;
     private HistoryDB history;
 
+    private GSwipeLayout swipe;
     private FrameLayout webContainer;
     private EditText omnibox;
     private ImageButton btnSecurity, btnRefresh, btnBack, btnForward, btnHome;
@@ -101,6 +110,20 @@ public class MainActivity extends AppCompatActivity {
     private View fullscreenView;
     private GeckoSession fullscreenSession;
 
+    /** Pending Android runtime-permission request (gecko callback or media grant). */
+    private GeckoSession.PermissionDelegate.Callback pendingAndroidCallback;
+    private GeckoSession.PermissionDelegate.MediaCallback pendingMediaCallback;
+    private GeckoSession.PermissionDelegate.MediaSource pendingMediaVideo;
+    private GeckoSession.PermissionDelegate.MediaSource pendingMediaAudio;
+    private final ActivityResultLauncher<String[]> permLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(),
+                    result -> resolvePendingPermissions(result));
+    /** Pending file-picker prompt (multiple documents via ACTION_OPEN_DOCUMENT). */
+    private GeckoSession.PromptDelegate.FilePrompt pendingFilePrompt;
+    private final ActivityResultLauncher<Intent> fileLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),
+                    result -> resolveFilePrompt(result));
+
     private final TabManager tabs = new TabManager();
 
     @Override
@@ -113,6 +136,7 @@ public class MainActivity extends AppCompatActivity {
         history = new HistoryDB(this);
 
         webContainer = findViewById(R.id.webContainer);
+        swipe = findViewById(R.id.swipe);
         omnibox = findViewById(R.id.omnibox);
         btnSecurity = findViewById(R.id.btnSecurity);
         btnRefresh = findViewById(R.id.btnRefresh);
@@ -136,6 +160,32 @@ public class MainActivity extends AppCompatActivity {
         fullscreenContainer.setVisibility(View.GONE);
 
         createRuntime();
+
+        // Pull-to-refresh: gated by the session's real scroll position.
+        swipe.setOnRefreshListener(() -> {
+            swipe.setRefreshing(false);
+            Tab t = tabs.currentTab();
+            if (t != null && !isStartPage(t)) t.session.reload();
+        });
+        swipe.setColorSchemeResources(R.color.accent);
+        swipe.setProbe(new GSwipeLayout.Probe() {
+            @Override
+            public boolean canScrollUp() {
+                Tab t = tabs.currentTab();
+                return t != null && t.scrollY > 0;
+            }
+
+            @Override
+            public boolean gesturesEnabled() {
+                return prefs.gestures() && tabSwitcher.getVisibility() != View.VISIBLE
+                        && (findViewById(R.id.findBar)).getVisibility() != View.VISIBLE;
+            }
+
+            @Override
+            public void onEdgeSwipe(int dir) {
+                cycleTab(dir);
+            }
+        });
 
         btnSecurity.setOnClickListener(v -> showBlockInfo());
         btnRefresh.setOnClickListener(v -> {
@@ -237,16 +287,24 @@ public class MainActivity extends AppCompatActivity {
 
     private void createRuntime() {
         @GeckoRuntimeSettings.ColorScheme int scheme = colorSchemeConstant();
-        runtime = GeckoRuntime.create(this, new GeckoRuntimeSettings.Builder()
-                .contentBlocking(new org.mozilla.geckoview.ContentBlocking.Settings.Builder()
+        org.mozilla.geckoview.ContentBlocking.Settings.Builder cb =
+                new org.mozilla.geckoview.ContentBlocking.Settings.Builder()
                         .antiTracking(org.mozilla.geckoview.ContentBlocking.AntiTracking.STRICT)
                         .enhancedTrackingProtectionLevel(
-                                org.mozilla.geckoview.ContentBlocking.EtpLevel.STRICT)
-                        .build())
+                                org.mozilla.geckoview.ContentBlocking.EtpLevel.STRICT);
+        int cbMode = prefs.cookieBanners()
+                ? org.mozilla.geckoview.ContentBlocking.CookieBannerMode.COOKIE_BANNER_MODE_REJECT
+                : org.mozilla.geckoview.ContentBlocking.CookieBannerMode.COOKIE_BANNER_MODE_DISABLED;
+        cb.cookieBannerHandlingMode(cbMode);
+        cb.cookieBannerHandlingModePrivateBrowsing(cbMode);
+        runtime = GeckoRuntime.create(this, new GeckoRuntimeSettings.Builder()
+                .contentBlocking(cb.build())
                 .preferredColorScheme(scheme)
+                .fontSizeFactor(prefs.fontSizeFactor())
                 .aboutConfigEnabled(false)
                 .debugLogging(false)
                 .build());
+        applyLocales();
         runtime.getWebExtensionController().ensureBuiltIn(EXTENSION_LOCATION, EXTENSION_ID)
                 .then(ext -> {
                     shield = ext;
@@ -276,8 +334,34 @@ public class MainActivity extends AppCompatActivity {
                             pushShieldConfig();
                         }
                     }, NATIVE_APP);
+                    // Reader articles arrive from the content script through a
+                    // per-session message delegate (sender.session = tab).
+                    for (Tab t : tabs.tabs()) attachReaderDelegate(t);
                     return null;
                 });
+    }
+
+    /** Applies the content-language override to the runtime. */
+    private void applyLocales() {
+        try {
+            String loc = prefs.locale();
+            runtime.getSettings().setLocales(loc.isEmpty() ? null : new String[]{loc});
+        } catch (Exception ignored) {}
+    }
+
+    /** Re-applies every runtime-level setting from prefs (after Settings). */
+    private void applyRuntimeSettings() {
+        if (runtime == null) return;
+        try {
+            runtime.getSettings().setPreferredColorScheme(colorSchemeConstant());
+            runtime.getSettings().setFontSizeFactor(prefs.fontSizeFactor());
+            int cbMode = prefs.cookieBanners()
+                    ? org.mozilla.geckoview.ContentBlocking.CookieBannerMode.COOKIE_BANNER_MODE_REJECT
+                    : org.mozilla.geckoview.ContentBlocking.CookieBannerMode.COOKIE_BANNER_MODE_DISABLED;
+            runtime.getSettings().getContentBlocking().setCookieBannerMode(cbMode);
+            runtime.getSettings().getContentBlocking().setCookieBannerModePrivateBrowsing(cbMode);
+            applyLocales();
+        } catch (Exception ignored) {}
     }
 
     private @GeckoRuntimeSettings.ColorScheme int colorSchemeConstant() {
@@ -318,7 +402,7 @@ public class MainActivity extends AppCompatActivity {
     private void allowCurrentSite() {
         Tab t = tabs.currentTab();
         if (t == null || isStartPage(t)) return;
-        String host = Utils.hostOf(t.url);
+        String host = Utils.hostOf(pageUrl(t));
         if (host == null || host.isEmpty()) return;
         String cur = prefs.allowlist();
         if (Utils.siteListContains(cur, host)) {
@@ -361,12 +445,15 @@ public class MainActivity extends AppCompatActivity {
         GeckoView view = new GeckoView(this);
         view.setLayoutParams(new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        // The default print delegate needs an Activity context for PrintManager.
+        view.setActivityContextDelegate(() -> MainActivity.this);
         webContainer.addView(view);
         session.open(runtime);
         view.setSession(session);
 
         Tab tab = tabs.add(new Tab(tabs.count() + System.identityHashCode(session), session, view, incognito));
         setupSession(tab);
+        attachReaderDelegate(tab);
         loadInTab(tab, (url == null || url.isEmpty()) ? HOME_URL : url);
         showCurrentWebView();
         updateChrome(tab);
@@ -465,6 +552,13 @@ public class MainActivity extends AppCompatActivity {
             public void onSessionStateChange(@NonNull GeckoSession s,
                                              @NonNull GeckoSession.SessionState state) {
                 tab.state = state;
+            }
+        });
+
+        session.setScrollDelegate(new GeckoSession.ScrollDelegate() {
+            @Override
+            public void onScrollChanged(@NonNull GeckoSession s, int scrollX, int scrollY) {
+                tab.scrollY = scrollY;
             }
         });
 
@@ -583,17 +677,25 @@ public class MainActivity extends AppCompatActivity {
                 if (needed.isEmpty()) {
                     callback.grant();
                 } else {
-                    callback.reject();
+                    // Route through the platform runtime dialog; the Gecko
+                    // callback completes when the user answers.
+                    pendingAndroidCallback = callback;
+                    permLauncher.launch(needed.toArray(new String[0]));
                 }
             }
 
             @Override
             public GeckoResult<Integer> onContentPermissionRequest(@NonNull GeckoSession s,
                                                                    @NonNull GeckoSession.PermissionDelegate.ContentPermission perm) {
-                // Privacy-first default: website content permissions (location,
-                // camera, mic, notifications, ...) are denied. Documented in
-                // docs/PRIVACY.md.
-                return GeckoResult.fromValue(GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY);
+                return handleContentPermission(tab, perm);
+            }
+
+            @Override
+            public void onMediaPermissionRequest(@NonNull GeckoSession s, String url,
+                                                 GeckoSession.PermissionDelegate.MediaSource[] video,
+                                                 GeckoSession.PermissionDelegate.MediaSource[] audio,
+                                                 @NonNull GeckoSession.PermissionDelegate.MediaCallback callback) {
+                handleMediaPermission(tab, url, video, audio, callback);
             }
         });
 
@@ -603,12 +705,272 @@ public class MainActivity extends AppCompatActivity {
                     @NonNull GeckoSession s,
                     @NonNull GeckoSession.PromptDelegate.AlertPrompt prompt) {
                 new AlertDialog.Builder(MainActivity.this)
-                        .setTitle(R.string.alert_dialog)
-                        .setMessage(prompt.title == null ? "" : prompt.title)
+                        .setTitle(prompt.title == null || prompt.title.isEmpty()
+                                ? getString(R.string.alert_dialog) : prompt.title)
+                        .setMessage(prompt.message == null ? "" : prompt.message)
                         .setPositiveButton(R.string.ok, (d, w) -> d.dismiss())
-                        .setOnDismissListener(d -> prompt.dismiss())
+                        .setOnCancelListener(d -> prompt.dismiss())
                         .show();
+                return null;    // alert() has no return value; dismiss completes it
+            }
+
+            @Override
+            public GeckoResult<GeckoSession.PromptDelegate.PromptResponse> onButtonPrompt(
+                    @NonNull GeckoSession s,
+                    @NonNull GeckoSession.PromptDelegate.ButtonPrompt prompt) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle(prompt.title == null || prompt.title.isEmpty()
+                                ? getString(R.string.confirm_dialog) : prompt.title)
+                        .setMessage(prompt.message == null ? "" : prompt.message)
+                        .setPositiveButton(R.string.ok,
+                                (d, w) -> prompt.confirm(GeckoSession.PromptDelegate.ButtonPrompt.Type.POSITIVE))
+                        .setNegativeButton(R.string.cancel,
+                                (d, w) -> prompt.confirm(GeckoSession.PromptDelegate.ButtonPrompt.Type.NEGATIVE))
+                        .setOnCancelListener(d -> prompt.dismiss())
+                        .show();
+                return null;
+            }
+
+            @Override
+            public GeckoResult<GeckoSession.PromptDelegate.PromptResponse> onBeforeUnloadPrompt(
+                    @NonNull GeckoSession s,
+                    @NonNull GeckoSession.PromptDelegate.ButtonPrompt prompt) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle(R.string.leave_page_title)
+                        .setMessage(prompt.message == null
+                                ? getString(R.string.leave_page_body) : prompt.message)
+                        .setPositiveButton(R.string.leave_page_stay,
+                                (d, w) -> prompt.confirm(GeckoSession.PromptDelegate.ButtonPrompt.Type.NEGATIVE))
+                        .setNegativeButton(R.string.leave_page_go,
+                                (d, w) -> prompt.confirm(GeckoSession.PromptDelegate.ButtonPrompt.Type.POSITIVE))
+                        .setOnCancelListener(d -> prompt.dismiss())
+                        .show();
+                return null;
+            }
+
+            @Override
+            public GeckoResult<GeckoSession.PromptDelegate.PromptResponse> onRepostConfirmPrompt(
+                    @NonNull GeckoSession s,
+                    @NonNull GeckoSession.PromptDelegate.ButtonPrompt prompt) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle(R.string.repost_title)
+                        .setMessage(R.string.repost_body)
+                        .setPositiveButton(R.string.repost_continue,
+                                (d, w) -> prompt.confirm(GeckoSession.PromptDelegate.ButtonPrompt.Type.POSITIVE))
+                        .setNegativeButton(R.string.cancel,
+                                (d, w) -> prompt.confirm(GeckoSession.PromptDelegate.ButtonPrompt.Type.NEGATIVE))
+                        .setOnCancelListener(d -> prompt.dismiss())
+                        .show();
+                return null;
+            }
+
+            @Override
+            public GeckoResult<GeckoSession.PromptDelegate.PromptResponse> onTextPrompt(
+                    @NonNull GeckoSession s,
+                    @NonNull GeckoSession.PromptDelegate.TextPrompt prompt) {
+                LinearLayout box = new LinearLayout(MainActivity.this);
+                box.setOrientation(LinearLayout.VERTICAL);
+                int pad = (int) (20 * getResources().getDisplayMetrics().density);
+                box.setPadding(pad, pad / 2, pad, 0);
+                if (prompt.message != null && !prompt.message.isEmpty()) {
+                    TextView msg = new TextView(MainActivity.this);
+                    msg.setText(prompt.message);
+                    box.addView(msg);
+                }
+                EditText input = new EditText(MainActivity.this);
+                input.setText(prompt.defaultValue == null ? "" : prompt.defaultValue);
+                box.addView(input);
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle(prompt.title == null || prompt.title.isEmpty()
+                                ? getString(R.string.alert_dialog) : prompt.title)
+                        .setView(box)
+                        .setPositiveButton(R.string.ok,
+                                (d, w) -> prompt.confirm(input.getText().toString()))
+                        .setNegativeButton(R.string.cancel, (d, w) -> prompt.dismiss())
+                        .setOnCancelListener(d -> prompt.dismiss())
+                        .show();
+                return null;
+            }
+
+            @Override
+            public GeckoResult<GeckoSession.PromptDelegate.PromptResponse> onAuthPrompt(
+                    @NonNull GeckoSession s,
+                    @NonNull GeckoSession.PromptDelegate.AuthPrompt prompt) {
+                boolean onlyPassword = false;
+                try {
+                    onlyPassword = (prompt.authOptions.flags
+                            & GeckoSession.PromptDelegate.AuthPrompt.AuthOptions.Flags.ONLY_PASSWORD) != 0;
+                } catch (Exception ignored) {}
+                LinearLayout box = new LinearLayout(MainActivity.this);
+                box.setOrientation(LinearLayout.VERTICAL);
+                int pad = (int) (20 * getResources().getDisplayMetrics().density);
+                box.setPadding(pad, pad / 2, pad, 0);
+                TextView msg = new TextView(MainActivity.this);
+                msg.setText(prompt.message == null
+                        ? getString(R.string.auth_message) : prompt.message);
+                box.addView(msg);
+                final EditText user = new EditText(MainActivity.this);
+                user.setHint(R.string.auth_username);
+                if (!onlyPassword) box.addView(user);
+                final EditText pass = new EditText(MainActivity.this);
+                pass.setHint(R.string.auth_password);
+                pass.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                        | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                box.addView(pass);
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle(prompt.title == null || prompt.title.isEmpty()
+                                ? getString(R.string.auth_title) : prompt.title)
+                        .setView(box)
+                        .setPositiveButton(R.string.ok, (d, w) -> {
+                            if (onlyPassword) prompt.confirm(pass.getText().toString());
+                            else prompt.confirm(user.getText().toString(), pass.getText().toString());
+                        })
+                        .setNegativeButton(R.string.cancel, (d, w) -> prompt.dismiss())
+                        .setOnCancelListener(d -> prompt.dismiss())
+                        .show();
+                return null;
+            }
+
+            @Override
+            public GeckoResult<GeckoSession.PromptDelegate.PromptResponse> onChoicePrompt(
+                    @NonNull GeckoSession s,
+                    @NonNull GeckoSession.PromptDelegate.ChoicePrompt prompt) {
+                // Choices with nested menus are flattened to their top level.
+                GeckoSession.PromptDelegate.ChoicePrompt.Choice[] choices = prompt.choices;
+                if (choices == null || choices.length == 0) {
+                    return GeckoResult.fromValue(prompt.dismiss());
+                }
+                String[] labels = new String[choices.length];
+                for (int i = 0; i < choices.length; i++) labels[i] = choices[i].label == null ? "" : choices[i].label;
+                boolean multiple = prompt.type
+                        == GeckoSession.PromptDelegate.ChoicePrompt.Type.MULTIPLE;
+                AlertDialog.Builder b = new AlertDialog.Builder(MainActivity.this)
+                        .setTitle(prompt.title == null || prompt.title.isEmpty()
+                                ? getString(R.string.choose_dialog) : prompt.title);
+                if (multiple) {
+                    boolean[] checked = new boolean[choices.length];
+                    ArrayList<String> picked = new ArrayList<>();
+                    b.setMultiChoiceItems(labels, checked, (d, which, isChecked) -> {
+                        if (isChecked) picked.add(choices[which].id);
+                        else picked.remove(choices[which].id);
+                    });
+                    b.setPositiveButton(R.string.ok, (d, w) ->
+                            prompt.confirm(picked.toArray(new String[0])));
+                } else {
+                    b.setSingleChoiceItems(labels, -1, (d, which) -> {
+                        prompt.confirm(choices[which].id);
+                        d.dismiss();
+                    });
+                }
+                b.setNegativeButton(R.string.cancel, (d, w) -> prompt.dismiss());
+                b.setOnCancelListener(d -> prompt.dismiss());
+                b.show();
+                return null;
+            }
+
+            @Override
+            public GeckoResult<GeckoSession.PromptDelegate.PromptResponse> onColorPrompt(
+                    @NonNull GeckoSession s,
+                    @NonNull GeckoSession.PromptDelegate.ColorPrompt prompt) {
+                final String[] palette = {
+                        "#000000", "#4355b9", "#1e88e5", "#43a047", "#fdd835",
+                        "#fb8c00", "#e53935", "#8e24aa", "#00897b", "#6d4c41",
+                        "#9e9e9e", "#ffffff"
+                };
+                LinearLayout row = new LinearLayout(MainActivity.this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(android.view.Gravity.CENTER);
+                int pad = (int) (16 * getResources().getDisplayMetrics().density);
+                row.setPadding(pad, pad, pad, pad);
+                final AlertDialog[] holder = new AlertDialog[1];
+                for (final String color : palette) {
+                    TextView sw = new TextView(MainActivity.this);
+                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                            (int) (34 * getResources().getDisplayMetrics().density),
+                            (int) (34 * getResources().getDisplayMetrics().density));
+                    lp.setMargins(6, 6, 6, 6);
+                    sw.setLayoutParams(lp);
+                    sw.setBackgroundColor(android.graphics.Color.parseColor(color));
+                    sw.setOnClickListener(v -> {
+                        prompt.confirm(color);
+                        if (holder[0] != null) holder[0].dismiss();
+                    });
+                    row.addView(sw);
+                }
+                holder[0] = new AlertDialog.Builder(MainActivity.this)
+                        .setTitle(R.string.choose_color)
+                        .setView(row)
+                        .setNegativeButton(R.string.cancel, (dd, w) -> prompt.dismiss())
+                        .setOnCancelListener(dd -> prompt.dismiss())
+                        .create();
+                holder[0].show();
+                return null;
+            }
+
+            @Override
+            public GeckoResult<GeckoSession.PromptDelegate.PromptResponse> onDateTimePrompt(
+                    @NonNull GeckoSession s,
+                    @NonNull GeckoSession.PromptDelegate.DateTimePrompt prompt) {
+                int type = prompt.type;
+                final boolean[] done = {false};
+                if (type == GeckoSession.PromptDelegate.DateTimePrompt.Type.DATE) {
+                    java.util.Calendar cal = java.util.Calendar.getInstance();
+                    android.app.DatePickerDialog dp = new android.app.DatePickerDialog(MainActivity.this,
+                            (view, y, m, day) -> {
+                                done[0] = true;
+                                prompt.confirm(String.format(
+                                        java.util.Locale.US, "%04d-%02d-%02d", y, m + 1, day));
+                            },
+                            cal.get(java.util.Calendar.YEAR),
+                            cal.get(java.util.Calendar.MONTH),
+                            cal.get(java.util.Calendar.DAY_OF_MONTH));
+                    dp.setOnCancelListener(d -> { if (!done[0]) prompt.dismiss(); });
+                    dp.show();
+                    return null;
+                }
+                if (type == GeckoSession.PromptDelegate.DateTimePrompt.Type.TIME) {
+                    java.util.Calendar cal = java.util.Calendar.getInstance();
+                    android.app.TimePickerDialog tp = new android.app.TimePickerDialog(MainActivity.this,
+                            (view, h, min) -> {
+                                done[0] = true;
+                                prompt.confirm(String.format(
+                                        java.util.Locale.US, "%02d:%02d", h, min));
+                            },
+                            cal.get(java.util.Calendar.HOUR_OF_DAY),
+                            cal.get(java.util.Calendar.MINUTE), true);
+                    tp.setOnCancelListener(d -> { if (!done[0]) prompt.dismiss(); });
+                    tp.show();
+                    return null;
+                }
+                // datetime-local / month / week pickers: dismissed honestly
+                // rather than approximated with a different control.
                 return GeckoResult.fromValue(prompt.dismiss());
+            }
+
+            @Override
+            public GeckoResult<GeckoSession.PromptDelegate.PromptResponse> onFilePrompt(
+                    @NonNull GeckoSession s,
+                    @NonNull GeckoSession.PromptDelegate.FilePrompt prompt) {
+                pendingFilePrompt = prompt;
+                Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                i.setType("*/*");
+                boolean multiple = prompt.type == GeckoSession.PromptDelegate.FilePrompt.Type.MULTIPLE;
+                i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple);
+                try {
+                    fileLauncher.launch(Intent.createChooser(i, getString(R.string.choose_file)));
+                } catch (Exception e) {
+                    pendingFilePrompt = null;
+                    return GeckoResult.fromValue(prompt.dismiss());
+                }
+                return null;
+            }
+
+            @Override
+            public GeckoResult<GeckoSession.PromptDelegate.PromptResponse> onPopupPrompt(
+                    @NonNull GeckoSession s,
+                    @NonNull GeckoSession.PromptDelegate.PopupPrompt prompt) {
+                return handlePopupPrompt(tab, prompt);
             }
         });
     }
@@ -629,10 +991,449 @@ public class MainActivity extends AppCompatActivity {
                 + "<code>error " + code + "</code></main></body></html>";
     }
 
+    // ---------- Content permissions (location, notifications, DRM, ...) ----
+
+    /**
+     * Website content-permission flow. Privacy-first: silent categories
+     * (tracking permission, autoplay) are always denied; everything else
+     * asks, with optional per-host memory. Settings can switch the default
+     * to deny-silently. Private tabs can decide per prompt but nothing is
+     * remembered.
+     */
+    /** Pending content-permission completion (Android 13+ notification bridge). */
+    private GeckoResult<Integer> pendingContentResult;
+    private boolean pendingContentAllow;
+
+    private GeckoResult<Integer> handleContentPermission(Tab tab,
+            GeckoSession.PermissionDelegate.ContentPermission perm) {
+        switch (perm.permission) {
+            case GeckoSession.PermissionDelegate.PERMISSION_TRACKING:
+            case GeckoSession.PermissionDelegate.PERMISSION_AUTOPLAY_INAUDIBLE:
+            case GeckoSession.PermissionDelegate.PERMISSION_AUTOPLAY_AUDIBLE:
+                // Privacy red lines: never allow site tracking permission;
+                // autoplay policy stays engine-default (denied).
+                return GeckoResult.fromValue(
+                        GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY);
+            default:
+                break;
+        }
+
+        String host = Utils.hostOf(perm.uri);
+        if (host == null || host.isEmpty()) {
+            return GeckoResult.fromValue(
+                    GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY);
+        }
+        int remembered = tab.incognito ? 0 : prefs.rememberedPermission(host, perm.permission);
+        if (remembered > 0) {
+            return allowNotifications(perm);
+        }
+        if (remembered < 0 || prefs.permDefault() == 1) {
+            return GeckoResult.fromValue(
+                    GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY);
+        }
+
+        final GeckoResult<Integer> result = new GeckoResult<>();
+        String what = permissionLabel(perm.permission);
+        String[] options = tab.incognito
+                ? new String[]{getString(R.string.perm_allow), getString(R.string.perm_deny)}
+                : new String[]{getString(R.string.perm_allow), getString(R.string.perm_deny),
+                               getString(R.string.perm_always_allow), getString(R.string.perm_always_deny)};
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.perm_request_title, what))
+                .setMessage(getString(R.string.perm_request_body, host, what))
+                .setItems(options, (d, which) -> {
+                    int value = GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY;
+                    if (which == 0) {
+                        value = GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW;
+                    } else if (which == 2 && !tab.incognito) {
+                        value = GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW;
+                        prefs.rememberPermission(host, perm.permission, 1);
+                    } else if (which == 3 && !tab.incognito) {
+                        value = GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY;
+                        prefs.rememberPermission(host, perm.permission, -1);
+                    }
+                    if (value == GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW) {
+                        allowNotifications(perm).then(v -> {
+                            result.complete(v == GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW
+                                    ? value
+                                    : GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY);
+                            return null;
+                        });
+                    } else {
+                        result.complete(value);
+                    }
+                })
+                .setOnCancelListener(d -> result.complete(
+                        GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY))
+                .show();
+        return result;
+    }
+
+    /** Android 13+ bridge: granting desktop notifications needs the platform
+     *  POST_NOTIFICATIONS permission. Without the bridge needed, completes
+     *  with ALLOW immediately; otherwise completes after the platform dialog. */
+    private GeckoResult<Integer> allowNotifications(
+            GeckoSession.PermissionDelegate.ContentPermission perm) {
+        boolean needsBridge = perm.permission
+                == GeckoSession.PermissionDelegate.PERMISSION_DESKTOP_NOTIFICATION
+                && android.os.Build.VERSION.SDK_INT >= 33
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                   != PackageManager.PERMISSION_GRANTED;
+        if (!needsBridge) {
+            return GeckoResult.fromValue(
+                    GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW);
+        }
+        final GeckoResult<Integer> result = new GeckoResult<>();
+        pendingContentResult = result;
+        pendingContentAllow = true;
+        permLauncher.launch(new String[]{Manifest.permission.POST_NOTIFICATIONS});
+        return result;
+    }
+
+    private String permissionLabel(int perm) {
+        switch (perm) {
+            case GeckoSession.PermissionDelegate.PERMISSION_GEOLOCATION: return getString(R.string.perm_location);
+            case GeckoSession.PermissionDelegate.PERMISSION_DESKTOP_NOTIFICATION: return getString(R.string.perm_notifications);
+            case GeckoSession.PermissionDelegate.PERMISSION_PERSISTENT_STORAGE: return getString(R.string.perm_storage);
+            case GeckoSession.PermissionDelegate.PERMISSION_MEDIA_KEY_SYSTEM_ACCESS: return getString(R.string.perm_drm);
+            case GeckoSession.PermissionDelegate.PERMISSION_STORAGE_ACCESS: return getString(R.string.perm_storage_access);
+            case GeckoSession.PermissionDelegate.PERMISSION_XR: return getString(R.string.perm_xr);
+            default: return getString(R.string.perm_generic);
+        }
+    }
+
+    /** Camera / microphone (media) permission: dialog + platform runtime grant. */
+    private void handleMediaPermission(Tab tab, String url,
+                                       GeckoSession.PermissionDelegate.MediaSource[] video,
+                                       GeckoSession.PermissionDelegate.MediaSource[] audio,
+                                       GeckoSession.PermissionDelegate.MediaCallback callback) {
+        String host = Utils.hostOf(url);
+        if (host == null || host.isEmpty()) {
+            callback.reject();
+            return;
+        }
+        boolean wantsVideo = video != null && video.length > 0;
+        boolean wantsAudio = audio != null && audio.length > 0;
+        int remembered = tab.incognito ? 0
+                : prefs.rememberedPermission(host, wantsVideo
+                        ? Manifest.permission.CAMERA : Manifest.permission.RECORD_AUDIO);
+        if (remembered < 0 || prefs.permDefault() == 1) {
+            callback.reject();
+            return;
+        }
+
+        java.util.ArrayList<String> appPerms = new java.util.ArrayList<>();
+        if (wantsVideo) appPerms.add(Manifest.permission.CAMERA);
+        if (wantsAudio) appPerms.add(Manifest.permission.RECORD_AUDIO);
+        appPerms.removeIf(p -> ContextCompat.checkSelfPermission(this, p)
+                == PackageManager.PERMISSION_GRANTED);
+
+        String[] options = tab.incognito
+                ? new String[]{getString(R.string.perm_allow), getString(R.string.perm_deny)}
+                : new String[]{getString(R.string.perm_allow), getString(R.string.perm_deny),
+                               getString(R.string.perm_always_allow)};
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.perm_media_title,
+                        wantsVideo && wantsAudio ? getString(R.string.perm_camera_mic)
+                                : wantsVideo ? getString(R.string.perm_camera)
+                                : getString(R.string.perm_microphone)))
+                .setMessage(getString(R.string.perm_request_body, host,
+                        wantsVideo && wantsAudio ? getString(R.string.perm_camera_mic)
+                                : wantsVideo ? getString(R.string.perm_camera)
+                                : getString(R.string.perm_microphone)))
+                .setItems(options, (d, which) -> {
+                    if (which == 1) {
+                        callback.reject();
+                        return;
+                    }
+                    if (which == 2 && !tab.incognito) {
+                        prefs.rememberPermission(host, wantsVideo
+                                ? Manifest.permission.CAMERA : Manifest.permission.RECORD_AUDIO, 1);
+                    }
+                    if (appPerms.isEmpty()) {
+                        callback.grant(wantsVideo ? video[0] : null,
+                                       wantsAudio ? audio[0] : null);
+                        return;
+                    }
+                    pendingMediaCallback = callback;
+                    pendingMediaVideo = wantsVideo ? video[0] : null;
+                    pendingMediaAudio = wantsAudio ? audio[0] : null;
+                    permLauncher.launch(appPerms.toArray(new String[0]));
+                })
+                .setOnCancelListener(d -> callback.reject())
+                .show();
+    }
+
+    /** Completes the pending gecko permission callback after the platform dialog. */
+    private void resolvePendingPermissions(java.util.Map<String, Boolean> result) {
+        if (pendingContentResult != null) {
+            GeckoResult<Integer> r = pendingContentResult;
+            pendingContentResult = null;
+            boolean all = true;
+            for (Boolean granted : result.values()) all &= granted != null && granted;
+            r.complete(all && pendingContentAllow
+                    ? GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW
+                    : GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY);
+            return;
+        }
+        if (pendingAndroidCallback != null) {
+            GeckoSession.PermissionDelegate.Callback cb = pendingAndroidCallback;
+            pendingAndroidCallback = null;
+            boolean all = true;
+            for (Boolean granted : result.values()) all &= granted != null && granted;
+            if (all) cb.grant();
+            else cb.reject();
+            return;
+        }
+        if (pendingMediaCallback != null) {
+            GeckoSession.PermissionDelegate.MediaCallback cb = pendingMediaCallback;
+            pendingMediaCallback = null;
+            boolean all = true;
+            for (Boolean granted : result.values()) all &= granted != null && granted;
+            if (all) {
+                cb.grant(pendingMediaVideo, pendingMediaAudio);
+            } else {
+                cb.reject();
+            }
+            pendingMediaVideo = null;
+            pendingMediaAudio = null;
+        }
+    }
+
+    // ---------- Popups ----------
+
+    private GeckoResult<GeckoSession.PromptDelegate.PromptResponse> handlePopupPrompt(
+            Tab tab, GeckoSession.PromptDelegate.PopupPrompt prompt) {
+        String host = Utils.hostOf(prompt.targetUri);
+        if (!prefs.blockPopups()
+                || (host != null && Utils.siteListContains(prefs.popupAllowed(), host))) {
+            return GeckoResult.fromValue(prompt.confirm(AllowOrDeny.ALLOW));
+        }
+        if (tab == null || host == null || host.isEmpty()
+                || !host.equals(Utils.hostOf(tab.url))) {
+            toast(getString(R.string.popup_blocked, host == null ? "" : host));
+            return GeckoResult.fromValue(prompt.confirm(AllowOrDeny.DENY));
+        }
+        final GeckoResult<GeckoSession.PromptDelegate.PromptResponse> result = new GeckoResult<>();
+        String[] options = {
+                getString(R.string.popup_block),
+                getString(R.string.popup_allow_once),
+                getString(R.string.popup_always_allow, host)
+        };
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.popup_title, host))
+                .setItems(options, (d, which) -> {
+                    if (which == 0) {
+                        toast(getString(R.string.popup_blocked, host));
+                        result.complete(prompt.confirm(AllowOrDeny.DENY));
+                    } else {
+                        if (which == 2) prefs.popupAllowed(Utils.siteListAdd(prefs.popupAllowed(), host));
+                        result.complete(prompt.confirm(AllowOrDeny.ALLOW));
+                    }
+                })
+                .setOnCancelListener(d -> result.complete(prompt.confirm(AllowOrDeny.DENY)))
+                .show();
+        return result;
+    }
+
+    // ---------- File picker resolution ----------
+
+    private void resolveFilePrompt(androidx.activity.result.ActivityResult result) {
+        GeckoSession.PromptDelegate.FilePrompt prompt = pendingFilePrompt;
+        pendingFilePrompt = null;
+        if (prompt == null) return;
+        Intent data = result.getData();
+        ArrayList<Uri> uris = new ArrayList<>();
+        if (data != null) {
+            if (data.getClipData() != null) {
+                ClipData clip = data.getClipData();
+                for (int i = 0; i < clip.getItemCount(); i++) {
+                    Uri u = clip.getItemAt(i).getUri();
+                    if (u != null) uris.add(u);
+                }
+            } else if (data.getData() != null) {
+                uris.add(data.getData());
+            }
+        }
+        try {
+            for (Uri u : uris) {
+                getContentResolver().takePersistableUriPermission(u,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
+        } catch (Exception ignored) {}
+        if (uris.isEmpty()) {
+            prompt.dismiss();
+        } else if (uris.size() == 1) {
+            prompt.confirm(this, uris.get(0));
+        } else {
+            prompt.confirm(this, uris.toArray(new Uri[0]));
+        }
+    }
+
+    // ---------- Reader view ----------
+
+    /** Per-session message delegate that receives reader articles from the
+     *  shield content script (sender.session identifies the tab). */
+    private void attachReaderDelegate(Tab tab) {
+        if (shield == null || tab == null) return;
+        try {
+            tab.session.getWebExtensionController().setMessageDelegate(shield,
+                    new WebExtension.MessageDelegate() {
+                        @Override
+                        public GeckoResult<Object> onMessage(@NonNull String nativeApp,
+                                                             @NonNull Object message,
+                                                             @NonNull WebExtension.MessageSender sender) {
+                            if (sender.session != tab.session) return null;
+                            if (!(message instanceof JSONObject)) return null;
+                            JSONObject o = (JSONObject) message;
+                            if (!"reader".equals(o.optString("type"))) return null;
+                            if (!o.optBoolean("readerable", false)) return null;
+                            Tab.ReaderArticle a = new Tab.ReaderArticle();
+                            a.url = o.optString("url");
+                            a.title = o.optString("title");
+                            a.byline = o.optString("byline");
+                            a.siteName = o.optString("siteName");
+                            a.content = o.optString("content");
+                            a.length = o.optInt("length", 0);
+                            if (a.content.length() > 0) tab.readerArticle = a;
+                            return null;
+                        }
+                    }, NATIVE_APP);
+        } catch (Exception ignored) {}
+    }
+
+    private void toggleReader() {
+        Tab t = tabs.currentTab();
+        if (t == null) return;
+        if (t.readerActive) {
+            exitReader(t);
+            return;
+        }
+        Tab.ReaderArticle a = t.readerArticle;
+        if (a == null) {
+            toast(R.string.reader_unavailable);
+            return;
+        }
+        boolean dark = prefs.colorScheme() == 2
+                || (prefs.colorScheme() == 0
+                    && (getResources().getConfiguration().uiMode
+                        & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                       == android.content.res.Configuration.UI_MODE_NIGHT_YES);
+        ReaderSupport.Rendered r = ReaderSupport.render(this, a, dark, prefs.readerTextScale());
+        if (r == null) {
+            toast(R.string.reader_unavailable);
+            return;
+        }
+        t.readerSourceUrl = t.url;
+        t.readerActive = true;
+        hideFindBar();
+        t.session.loadUri(Uri.fromFile(r.file).toString());
+        updateChrome(t);
+        toast(getString(R.string.reader_opened, r.readingTime));
+    }
+
+    private void exitReader(Tab t) {
+        t.readerActive = false;
+        String src = t.readerSourceUrl;
+        t.readerSourceUrl = null;
+        deleteReaderFile();
+        loadInTab(t, src == null || src.isEmpty() ? HOME_URL : src);
+        updateChrome(t);
+    }
+
+    /** Reader renders happen in app cache; the file is removed on exit. */
+    private void deleteReaderFile() {
+        try {
+            File f = new File(getCacheDir(), "reader/reader.html");
+            // noinspection ResultOfMethodCallIgnored
+            f.delete();
+        } catch (Exception ignored) {}
+    }
+
+    // ---------- Print + Save as PDF ----------
+
+    /** Opens the Android print dialog (which includes "Save as PDF"). */
+    private void printCurrent() {
+        Tab t = tabs.currentTab();
+        if (t == null || isStartPage(t)) return;
+        try {
+            t.session.printPageContent();
+        } catch (Exception e) {
+            toast(R.string.print_failed);
+        }
+    }
+
+    /** Renders the page to a PDF and saves it into the Downloads collection. */
+    private void savePdf() {
+        Tab t = tabs.currentTab();
+        if (t == null || isStartPage(t)) return;
+        toast(R.string.saving_pdf);
+        try {
+            t.session.saveAsPdf().then(stream -> {
+                runOnUiThread(() -> savePdfStream(t, stream));
+                return null;
+            }).exceptionally(e -> {
+                runOnUiThread(() -> toast(R.string.print_failed));
+                return null;
+            });
+        } catch (Exception e) {
+            toast(R.string.print_failed);
+        }
+    }
+
+    private void savePdfStream(Tab t, java.io.InputStream is) {
+        try {
+            String base = t.title == null || t.title.trim().isEmpty() ? "zerium-page" : t.title;
+            String safe = base.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
+            if (safe.length() > 60) safe = safe.substring(0, 60);
+            String name = safe + ".pdf";
+            Uri item;
+            ContentValues cv = new ContentValues();
+            cv.put(MediaStore.Downloads.DISPLAY_NAME, name);
+            cv.put(MediaStore.Downloads.MIME_TYPE, "application/pdf");
+            cv.put(MediaStore.Downloads.IS_PENDING, 1);
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                item = getContentResolver()
+                        .insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+            } else {
+                item = null;
+            }
+            java.io.File legacy = null;
+            if (item == null) {
+                legacy = new File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), name);
+                if (legacy.exists()) {
+                    legacy = new File(legacy.getParentFile(),
+                            System.currentTimeMillis() + "_" + name);
+                }
+            }
+            try (java.io.OutputStream os = item != null
+                            ? getContentResolver().openOutputStream(item)
+                            : new java.io.FileOutputStream(legacy)) {
+                if (os == null || is == null) throw new IllegalStateException("stream");
+                byte[] buf = new byte[16384];
+                int n;
+                while ((n = is.read(buf)) > 0) os.write(buf, 0, n);
+            }
+            if (item != null) {
+                ContentValues done = new ContentValues();
+                done.put(MediaStore.Downloads.IS_PENDING, 0);
+                getContentResolver().update(item, done, null, null);
+            }
+            toast(getString(R.string.pdf_saved, name));
+        } catch (Exception e) {
+            toast(R.string.print_failed);
+        }
+    }
+
     // ---------- Page tools ----------
 
     private void loadInTab(Tab tab, String url) {
         if (tab == null || url == null) return;
+        // Leaving the reader page by any navigation clears reader state.
+        if (tab.readerActive && (url == null || !url.startsWith("file:"))) {
+            tab.readerActive = false;
+            tab.readerSourceUrl = null;
+        }
         if (HOME_URL.equals(url)) {
             tab.url = HOME_URL;
             tab.title = getString(R.string.start_page);
@@ -643,10 +1444,33 @@ public class MainActivity extends AppCompatActivity {
         tab.session.loadUri(url);
     }
 
+    /** The real page URL, even while the reader rendering is on screen. */
+    private static String pageUrl(Tab t) {
+        if (t == null) return "";
+        if (t.readerActive && t.readerSourceUrl != null) return t.readerSourceUrl;
+        return t.url == null ? "" : t.url;
+    }
+
     /** Minimal generated start page (same spirit as the WebView edition). */
     private String startPageHtml() {
-        String q = "";
-        String action = Utils.engine(prefs).query;
+        String action = Utils.engineAt(prefs, prefs.searchEngine()).query;
+        // Most-visited tiles (local history only) + the total block count.
+        StringBuilder tiles = new StringBuilder();
+        try {
+            for (String host : history.topHosts(8)) {
+                String letter = host.isEmpty() ? "?" : host.substring(0, 1).toUpperCase();
+                tiles.append("<a class='tile' href='https://")
+                        .append(android.net.Uri.encode(host))
+                        .append("/'><span class='tl'>").append(escHtml(letter))
+                        .append("</span><span class='th'>").append(escHtml(host))
+                        .append("</span></a>");
+            }
+        } catch (Exception ignored) {}
+        long blocked = prefs.totalBlocked();
+        String stats = blocked > 0
+                ? "<div class='stats'>" + String.format(java.util.Locale.US,
+                        "%,d", blocked) + " trackers and ads blocked so far</div>"
+                : "";
         return "<!DOCTYPE html><html><head><meta charset='utf-8'>"
                 + "<meta name='viewport' content='width=device-width,initial-scale=1'>"
                 + "<style>body{font-family:system-ui,sans-serif;background:#f6f7fb;color:#1b1b1f;"
@@ -663,8 +1487,19 @@ public class MainActivity extends AppCompatActivity {
                 + "background:transparent;color:#1b1b1f}"
                 + "button{flex:none;border:0;border-radius:22px;padding:11px 22px;font-size:14px;"
                 + "font-weight:600;color:#fff;background:#4355b9}"
+                + ".tiles{display:grid;grid-template-columns:repeat(4,minmax(64px,86px));gap:10px;"
+                + "margin-top:34px;width:100%;max-width:580px}"
+                + ".tile{display:flex;flex-direction:column;align-items:center;gap:6px;text-decoration:none;"
+                + "background:#fff;border:1px solid #e2e2ea;border-radius:16px;padding:12px 4px;"
+                + "box-shadow:0 4px 14px rgba(20,25,60,.05)}"
+                + ".tl{width:30px;height:30px;border-radius:10px;background:linear-gradient(135deg,#4355b9,#7c9cff);"
+                + "color:#fff;font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:center}"
+                + ".th{font-size:10px;color:#5f5f6b;max-width:100%;overflow:hidden;text-overflow:ellipsis;"
+                + "white-space:nowrap}"
+                + ".stats{margin-top:26px;font-size:12px;color:#5f5f6b}"
                 + "@media (prefers-color-scheme:dark){body{background:#0e1016;color:#e4e2e6}"
-                + ".search{background:#171a23;border-color:#2a2d38}input{color:#e4e2e6}}"
+                + ".search{background:#171a23;border-color:#2a2d38}input{color:#e4e2e6}"
+                + ".tile{background:#171a23;border-color:#2a2d38}.stats{color:#9a9aa6}}"
                 + "</style></head><body>"
                 + "<div class='logo'>Zerium&nbsp;G</div>"
                 + "<div class='tag'>Gecko engine &middot; engine-level blocking &middot; open source</div>"
@@ -673,7 +1508,16 @@ public class MainActivity extends AppCompatActivity {
                 + "return false'>"
                 + "<div class='search'><input id='q' type='search' placeholder='"
                 + getString(R.string.search_hint) + "' autofocus><button type='submit'>Go</button>"
-                + "</div></form></body></html>";
+                + "</div></form>"
+                + (tiles.length() > 0 ? "<div class='tiles'>" + tiles + "</div>" : "")
+                + stats
+                + "</body></html>";
+    }
+
+    private static String escHtml(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\"", "&quot;").replace("'", "&#39;");
     }
 
     /** Per-session desktop-site toggle (UA + viewport, Gecko-native). */
@@ -708,7 +1552,7 @@ public class MainActivity extends AppCompatActivity {
     private void translatePage() {
         Tab t = tabs.currentTab();
         if (t == null || isStartPage(t)) return;
-        Uri u = Uri.parse(t.url);
+        Uri u = Uri.parse(pageUrl(t));
         String host = u.getHost();
         if (host == null || host.isEmpty()) return;
         if (host.endsWith(".translate.goog") || host.equals("translate.goog")) return;
@@ -754,12 +1598,13 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateFindCount(GeckoSession.FinderResult result) {
         if (result == null) return;
-        // GeckoView reports whether the page has matches and the current match
-        // ordinal; there is no total, so the counter shows the match index.
+        // FinderResult gives the current match ordinal (1-based) and the
+        // total number of matches on the page (-1 while counting).
         if (result.found) {
-            findCount.setText(String.valueOf((int) result.current + 1));
+            int total = result.total < 0 ? 0 : result.total;
+            findCount.setText((result.current) + "/" + total);
         } else {
-            findCount.setText("0");
+            findCount.setText("0/0");
         }
     }
 
@@ -779,6 +1624,10 @@ public class MainActivity extends AppCompatActivity {
             omnibox.setText("");
             omnibox.setHint(R.string.search_hint);
             btnSecurity.setImageResource(R.drawable.ic_home);
+        } else if (tab.readerActive) {
+            omnibox.setText(getString(R.string.reader_prefix)
+                    + displayUrl(tab.readerSourceUrl == null ? tab.url : tab.readerSourceUrl));
+            btnSecurity.setImageResource(R.drawable.ic_lock);
         } else {
             omnibox.setText(displayUrl(tab.url));
             omnibox.setHint(R.string.search_hint);
@@ -790,6 +1639,8 @@ public class MainActivity extends AppCompatActivity {
         btnForward.setAlpha(tab.canGoForward ? 1f : 0.4f);
         int n = tabs.count();
         btnTabs.setText(n > 99 ? "99+" : String.valueOf(n));
+        // Refresh gesture only on real pages the user can reload.
+        swipe.setEnabled(prefs.pullToRefresh() && !isStartPage(tab));
     }
 
     private static String displayUrl(String url) {
@@ -828,20 +1679,28 @@ public class MainActivity extends AppCompatActivity {
                 ? R.string.menu_remove_bookmark : R.string.menu_add_bookmark);
         pm.getMenu().add(0, MENU_BOOKMARKS, 3, R.string.menu_bookmarks);
         pm.getMenu().add(0, MENU_HISTORY, 4, R.string.menu_history);
-        pm.getMenu().add(0, MENU_FIND, 5, R.string.menu_find);
-        pm.getMenu().add(0, MENU_DESKTOP, 6, R.string.menu_desktop)
+        pm.getMenu().add(0, MENU_DOWNLOADS, 5, R.string.menu_downloads);
+        pm.getMenu().add(0, MENU_FIND, 6, R.string.menu_find);
+        pm.getMenu().add(0, MENU_READER, 7, t != null && t.readerActive
+                ? R.string.menu_reader_exit : R.string.menu_reader)
+                .setEnabled(t != null && (t.readerActive || t.readerArticle != null));
+        pm.getMenu().add(0, MENU_DESKTOP, 8, R.string.menu_desktop)
                 .setCheckable(true).setChecked(t != null && isDesktop(t));
-        pm.getMenu().add(0, MENU_JS, 7, R.string.menu_javascript)
+        pm.getMenu().add(0, MENU_JS, 9, R.string.menu_javascript)
                 .setCheckable(true)
                 .setChecked(t != null && t.session.getSettings().getAllowJavascript());
-        pm.getMenu().add(0, MENU_TRANSLATE, 8, R.string.menu_translate)
+        pm.getMenu().add(0, MENU_TRANSLATE, 10, R.string.menu_translate)
                 .setEnabled(t != null && !isStartPage(t));
-        pm.getMenu().add(0, MENU_SHARE, 9, R.string.menu_share);
-        pm.getMenu().add(0, MENU_ALLOW_SITE, 10, R.string.menu_allow_site)
+        pm.getMenu().add(0, MENU_PRINT, 11, R.string.menu_print)
                 .setEnabled(t != null && !isStartPage(t));
-        pm.getMenu().add(0, MENU_BLOCK_INFO, 11, R.string.menu_block_info);
-        pm.getMenu().add(0, MENU_SETTINGS, 12, R.string.menu_settings);
-        pm.getMenu().add(0, MENU_EXIT, 13, R.string.menu_exit);
+        pm.getMenu().add(0, MENU_SAVE_PDF, 12, R.string.menu_save_pdf)
+                .setEnabled(t != null && !isStartPage(t));
+        pm.getMenu().add(0, MENU_SHARE, 13, R.string.menu_share);
+        pm.getMenu().add(0, MENU_ALLOW_SITE, 14, R.string.menu_allow_site)
+                .setEnabled(t != null && !isStartPage(t));
+        pm.getMenu().add(0, MENU_BLOCK_INFO, 15, R.string.menu_block_info);
+        pm.getMenu().add(0, MENU_SETTINGS, 16, R.string.menu_settings);
+        pm.getMenu().add(0, MENU_EXIT, 17, R.string.menu_exit);
         pm.setOnMenuItemClickListener(item -> {
             handleMenu(item.getItemId());
             return true;
@@ -861,13 +1720,14 @@ public class MainActivity extends AppCompatActivity {
             case MENU_NEW_INCOGNITO: openTab(null, true); break;
             case MENU_BOOKMARK_ADD:
                 if (t == null || isStartPage(t)) return;
-                if (bookmarks.contains(t.url)) {
+                String pageNow = pageUrl(t);
+                if (bookmarks.contains(pageNow)) {
                     for (BookmarksDB.Entry e : bookmarks.all()) {
-                        if (e.url.equals(t.url)) { bookmarks.remove(e.id); break; }
+                        if (e.url.equals(pageNow)) { bookmarks.remove(e.id); break; }
                     }
                     toast(R.string.bookmark_removed);
                 } else {
-                    bookmarks.add(t.url, t.title);
+                    bookmarks.add(pageNow, t.title);
                     toast(R.string.bookmark_added);
                 }
                 break;
@@ -877,15 +1737,21 @@ public class MainActivity extends AppCompatActivity {
             case MENU_HISTORY:
                 startActivity(new Intent(this, HistoryActivity.class));
                 break;
+            case MENU_DOWNLOADS:
+                startActivity(new Intent(this, DownloadsActivity.class));
+                break;
             case MENU_FIND: showFindBar(); break;
+            case MENU_READER: toggleReader(); break;
             case MENU_DESKTOP: toggleDesktop(); break;
             case MENU_JS: toggleJavascript(); break;
             case MENU_TRANSLATE: translatePage(); break;
+            case MENU_PRINT: printCurrent(); break;
+            case MENU_SAVE_PDF: savePdf(); break;
             case MENU_SHARE:
                 if (t != null && !isStartPage(t)) {
                     Intent si = new Intent(Intent.ACTION_SEND);
                     si.setType("text/plain");
-                    si.putExtra(Intent.EXTRA_TEXT, t.url);
+                    si.putExtra(Intent.EXTRA_TEXT, pageUrl(t));
                     startActivity(Intent.createChooser(si, getString(R.string.menu_share)));
                 }
                 break;
@@ -1099,44 +1965,65 @@ public class MainActivity extends AppCompatActivity {
 
     // ---------- Session persistence ----------
 
+    /** Saves URL + full session state (back/forward history) per tab. */
     private void restoreSession() {
         String saved = prefs.savedTabs();
         int index = prefs.savedTabIndex();
         int opened = 0;
+        int target = 0;
         if (saved != null && !saved.isEmpty()) {
-            for (String u : saved.split("\\|\\|")) {
-                if (u == null || u.trim().isEmpty()) continue;
-                if (opened >= MAX_RESTORED_TABS) break;
-                openTab(u.trim(), false);
-                opened++;
-            }
+            try {
+                org.json.JSONArray arr = new org.json.JSONArray(saved);
+                for (int i = 0; i < arr.length() && opened < MAX_RESTORED_TABS; i++) {
+                    org.json.JSONObject o = arr.optJSONObject(i);
+                    if (o == null) continue;
+                    String u = o.optString("u", "");
+                    String st = o.optString("s", "");
+                    if (u.isEmpty() && st.isEmpty()) continue;
+                    openTab(u.isEmpty() ? null : u, false);
+                    Tab t = tabs.tabs().get(tabs.count() - 1);
+                    if (!st.isEmpty()) {
+                        try {
+                            GeckoSession.SessionState state =
+                                    GeckoSession.SessionState.fromString(st);
+                            if (state != null) t.session.restoreState(state);
+                        } catch (Exception ignored) {}
+                    }
+                    if (i == index) target = opened;
+                    opened++;
+                }
+            } catch (Exception ignored) {}
         }
         if (opened == 0) {
             openTab(null, false);
         } else {
-            int target = Math.max(0, Math.min(index, opened - 1));
-            tabs.setCurrent(target);
+            tabs.setCurrent(Math.max(0, Math.min(target, opened - 1)));
             showCurrentWebView();
             updateChrome(tabs.currentTab());
         }
     }
 
     private void saveSession() {
-        StringBuilder sb = new StringBuilder();
-        int current = 0;
-        int i = 0;
-        for (Tab t : tabs.tabs()) {
-            if (t.incognito) continue;
-            String u = t.url == null ? "" : t.url;
-            if (u.startsWith("data:")) u = HOME_URL;
-            if (sb.length() > 0) sb.append("||");
-            if (i == tabs.current()) current = i;
-            sb.append(u);
-            i++;
-            if (i >= MAX_RESTORED_TABS) break;
-        }
-        prefs.savedTabs(sb.toString());
-        prefs.savedTabIndex(current);
+        try {
+            org.json.JSONArray arr = new org.json.JSONArray();
+            int current = 0;
+            int i = 0;
+            for (Tab t : tabs.tabs()) {
+                if (t.incognito) continue;
+                String u = t.url == null ? "" : t.url;
+                if (u.startsWith("data:") || u.startsWith("file:")) u = "";
+                if (u.isEmpty() && t.state == null) continue;
+                org.json.JSONObject o = new org.json.JSONObject();
+                o.put("u", u);
+                if (t.state != null) o.put("s", t.state.toString());
+                if (i == tabs.current()) current = arr.length();
+                arr.put(o);
+                i++;
+                if (arr.length() >= MAX_RESTORED_TABS) break;
+            }
+            prefs.savedTabs(arr.length() == 0 ? "" : arr.toString());
+            prefs.savedTabIndex(current);
+        } catch (Exception ignored) {}
     }
 
     @Override
@@ -1146,14 +2033,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        deleteReaderFile();
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
-        // Settings may have changed: page color scheme applies to the runtime,
-        // new sessions pick up the global JS default, the shield gets the
-        // current allowlist.
-        if (runtime != null) {
-            runtime.getSettings().setPreferredColorScheme(colorSchemeConstant());
-        }
+        // Settings may have changed: color scheme, text size, content locale,
+        // cookie banners, the global JS default and the shield allowlist.
+        applyRuntimeSettings();
         pushShieldConfig();
         Tab t = tabs.currentTab();
         if (t != null) updateChrome(t);
@@ -1163,9 +2053,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == 101) {
-            if (runtime != null) {
-                runtime.getSettings().setPreferredColorScheme(colorSchemeConstant());
-            }
+            applyRuntimeSettings();
             pushShieldConfig();
             updateChrome(tabs.currentTab());
         }
@@ -1186,6 +2074,10 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         Tab t = tabs.currentTab();
+        if (t != null && t.readerActive) {
+            exitReader(t);
+            return;
+        }
         if (t != null && t.canGoBack) {
             t.session.goBack();
         } else if (t != null && !isStartPage(t)) {
