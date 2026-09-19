@@ -734,15 +734,15 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public GeckoResult<GeckoSession.PromptDelegate.PromptResponse> onBeforeUnloadPrompt(
                     @NonNull GeckoSession s,
-                    @NonNull GeckoSession.PromptDelegate.ButtonPrompt prompt) {
+                    @NonNull GeckoSession.PromptDelegate.BeforeUnloadPrompt prompt) {
                 new AlertDialog.Builder(MainActivity.this)
                         .setTitle(R.string.leave_page_title)
                         .setMessage(prompt.message == null
                                 ? getString(R.string.leave_page_body) : prompt.message)
                         .setPositiveButton(R.string.leave_page_stay,
-                                (d, w) -> prompt.confirm(GeckoSession.PromptDelegate.ButtonPrompt.Type.NEGATIVE))
+                                (d, w) -> prompt.confirm(AllowOrDeny.DENY))
                         .setNegativeButton(R.string.leave_page_go,
-                                (d, w) -> prompt.confirm(GeckoSession.PromptDelegate.ButtonPrompt.Type.POSITIVE))
+                                (d, w) -> prompt.confirm(AllowOrDeny.ALLOW))
                         .setOnCancelListener(d -> prompt.dismiss())
                         .show();
                 return null;
@@ -751,14 +751,14 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public GeckoResult<GeckoSession.PromptDelegate.PromptResponse> onRepostConfirmPrompt(
                     @NonNull GeckoSession s,
-                    @NonNull GeckoSession.PromptDelegate.ButtonPrompt prompt) {
+                    @NonNull GeckoSession.PromptDelegate.RepostConfirmPrompt prompt) {
                 new AlertDialog.Builder(MainActivity.this)
                         .setTitle(R.string.repost_title)
                         .setMessage(R.string.repost_body)
                         .setPositiveButton(R.string.repost_continue,
-                                (d, w) -> prompt.confirm(GeckoSession.PromptDelegate.ButtonPrompt.Type.POSITIVE))
+                                (d, w) -> prompt.confirm(AllowOrDeny.ALLOW))
                         .setNegativeButton(R.string.cancel,
-                                (d, w) -> prompt.confirm(GeckoSession.PromptDelegate.ButtonPrompt.Type.NEGATIVE))
+                                (d, w) -> prompt.confirm(AllowOrDeny.DENY))
                         .setOnCancelListener(d -> prompt.dismiss())
                         .show();
                 return null;
@@ -1023,7 +1023,7 @@ public class MainActivity extends AppCompatActivity {
             return GeckoResult.fromValue(
                     GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY);
         }
-        int remembered = tab.incognito ? 0 : prefs.rememberedPermission(host, perm.permission);
+        int remembered = tab.incognito ? 0 : prefs.rememberedPermission(host, String.valueOf(perm.permission));
         if (remembered > 0) {
             return allowNotifications(perm);
         }
@@ -1047,10 +1047,10 @@ public class MainActivity extends AppCompatActivity {
                         value = GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW;
                     } else if (which == 2 && !tab.incognito) {
                         value = GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW;
-                        prefs.rememberPermission(host, perm.permission, 1);
+                        prefs.rememberPermission(host, String.valueOf(perm.permission), 1);
                     } else if (which == 3 && !tab.incognito) {
                         value = GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY;
-                        prefs.rememberPermission(host, perm.permission, -1);
+                        prefs.rememberPermission(host, String.valueOf(perm.permission), -1);
                     }
                     if (value == GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW) {
                         allowNotifications(perm).then(v -> {

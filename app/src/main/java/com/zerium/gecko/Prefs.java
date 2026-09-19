@@ -103,24 +103,24 @@ public class Prefs {
     // ---------- remembered content permissions ----------
 
     /** Returns +1 (remembered allow), -1 (remembered deny) or 0 (no memory). */
-    public int rememberedPermission(String host, int perm) {
+    public int rememberedPermission(String host, String permKey) {
         try {
             JSONObject all = new JSONObject(permGrants());
             JSONObject site = all.optJSONObject(host);
             if (site == null) return 0;
-            return site.optInt(String.valueOf(perm), 0);
+            return site.optInt(permKey, 0);
         } catch (Exception e) {
             return 0;
         }
     }
 
     /** Stores a remembered decision; value is +1 or -1. Private tabs never call this. */
-    public void rememberPermission(String host, int perm, int value) {
+    public void rememberPermission(String host, String permKey, int value) {
         try {
             JSONObject all = new JSONObject(permGrants());
             JSONObject site = all.optJSONObject(host);
             if (site == null) { site = new JSONObject(); all.put(host, site); }
-            site.put(String.valueOf(perm), value);
+            site.put(permKey, value);
             permGrants(all.toString());
         } catch (Exception ignored) {}
     }
