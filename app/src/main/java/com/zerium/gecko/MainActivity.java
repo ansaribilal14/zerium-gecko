@@ -470,8 +470,9 @@ public class MainActivity extends AppCompatActivity {
 
         session.setNavigationDelegate(new GeckoSession.NavigationDelegate() {
             @Override
+            @SuppressWarnings({"unchecked", "rawtypes"})
             public void onLocationChange(@NonNull GeckoSession s, String url,
-                                         List<GeckoSession.PermissionRequest.Data> permissions,
+                                         List permissions,
                                          Boolean hasUserGesture) {
                 if (url != null && !url.isEmpty()) {
                     boolean changed = !url.equals(tab.url);
@@ -523,12 +524,13 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
-            public GeckoResult<AllowOrDeny> onLoadError(@NonNull GeckoSession s, String uri,
-                                                        @NonNull WebRequestError error) {
-                if (uri == null || uri.isEmpty()) return GeckoResult.fromValue(AllowOrDeny.DENY);
+            @NonNull
+            public GeckoResult<String> onLoadError(@NonNull GeckoSession s, String uri,
+                                                   @NonNull WebRequestError error) {
+                if (uri == null || uri.isEmpty()) return GeckoResult.fromValue(null);
                 String page = errorHtml(uri, error.category, error.code);
-                s.loadData(page, "text/html");
-                return GeckoResult.fromValue(AllowOrDeny.DENY);
+                String dataUri = GeckoSession.Loader.createDataUri(page, "text/html");
+                return GeckoResult.fromValue(dataUri);
             }
         });
 
@@ -632,7 +634,7 @@ public class MainActivity extends AppCompatActivity {
         if (HOME_URL.equals(url)) {
             tab.url = HOME_URL;
             tab.title = getString(R.string.start_page);
-            tab.session.loadData(startPageHtml(), "text/html");
+            tab.session.load(new GeckoSession.Loader().data(startPageHtml(), "text/html"));
             updateChrome(tab);
             return;
         }
@@ -750,10 +752,13 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateFindCount(GeckoSession.FinderResult result) {
         if (result == null) return;
-        int total = (int) result.found;
-        int ordinal = (int) result.current;
-        int shown = total == 0 ? 0 : ordinal + 1;
-        findCount.setText(shown + "/" + total);
+        // GeckoView reports whether the page has matches and the current match
+        // ordinal; there is no total, so the counter shows the match index.
+        if (result.found) {
+            findCount.setText(String.valueOf((int) result.current + 1));
+        } else {
+            findCount.setText("0");
+        }
     }
 
     private void hideFindBar() {
@@ -906,7 +911,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void showContextMenu(Tab tab, GeckoSession.ContentDelegate.ContextElement element) {
         final String link = element.linkUri;
-        final String image = ContextElement.TYPE_IMAGE.equals(element.type)
+        final String image = GeckoSession.ContentDelegate.ContextElement.TYPE_IMAGE.equals(element.type)
                 ? element.srcUri : null;
         if ((link == null || link.isEmpty()) && (image == null || image.isEmpty())) return;
         final String target = link != null && !link.isEmpty() ? link : image;
@@ -973,7 +978,11 @@ public class MainActivity extends AppCompatActivity {
         toast(R.string.download_failed_generic);
     }
 
-    /** Saves a Content-Disposition download into the public Downloads collection. */
+    /**
+     * Saves a Content-Disposition download. API 29+ uses the public Downloads
+     * collection; older devices fall back to the app's external files dir
+     * (no storage permission required) — stated in the save toast.
+     */
     private void saveDownload(org.mozilla.geckoview.WebResponse response) {
         try {
             String name = Utils.fileNameFromUrl(response.uri);
@@ -983,26 +992,45 @@ public class MainActivity extends AppCompatActivity {
             if (mime == null) {
                 mime = "application/octet-stream";
             }
-            ContentValues cv = new ContentValues();
-            cv.put(MediaStore.Downloads.DISPLAY_NAME, name);
-            cv.put(MediaStore.Downloads.MIME_TYPE, mime);
-            cv.put(MediaStore.Downloads.IS_PENDING, 1);
-            Uri item = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
-            if (item == null) {
-                toast(R.string.download_failed_generic);
-                return;
+            long written = 0;
+            Uri item = null;
+            java.io.File legacy = null;
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                ContentValues cv = new ContentValues();
+                cv.put(MediaStore.Downloads.DISPLAY_NAME, name);
+                cv.put(MediaStore.Downloads.MIME_TYPE, mime);
+                cv.put(MediaStore.Downloads.IS_PENDING, 1);
+                item = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+                if (item == null) {
+                    toast(R.string.download_failed_generic);
+                    return;
+                }
+            } else {
+                legacy = new java.io.File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), name);
+                if (legacy.exists()) {
+                    name = System.currentTimeMillis() + "_" + name;
+                    legacy = new java.io.File(legacy.getParentFile(), name);
+                }
             }
-            try (OutputStream os = getContentResolver().openOutputStream(item);
+            try (OutputStream os = item != null
+                            ? getContentResolver().openOutputStream(item)
+                            : new java.io.FileOutputStream(legacy);
                  java.io.InputStream is = response.body) {
                 if (os == null || is == null) throw new IllegalStateException("stream");
                 byte[] buf = new byte[16384];
                 int n;
-                while ((n = is.read(buf)) > 0) os.write(buf, 0, n);
+                while ((n = is.read(buf)) > 0) {
+                    os.write(buf, 0, n);
+                    written += n;
+                }
             }
-            cv.clear();
-            cv.put(MediaStore.Downloads.IS_PENDING, 0);
-            getContentResolver().update(item, cv, null, null);
-            toast(getString(R.string.download_saved, name));
+            if (item != null) {
+                ContentValues done = new ContentValues();
+                done.put(MediaStore.Downloads.IS_PENDING, 0);
+                getContentResolver().update(item, done, null, null);
+            }
+            toast(getString(R.string.download_saved,
+                    legacy != null ? legacy.getAbsolutePath() : name));
         } catch (Exception e) {
             toast(R.string.download_failed_generic);
         }

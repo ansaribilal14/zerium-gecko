@@ -1,6 +1,9 @@
 package com.zerium.gecko;
 
+import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
+import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
@@ -46,10 +49,10 @@ public class BookmarksActivity extends AppCompatActivity {
         };
         list.setAdapter(adapter);
         list.setOnItemClickListener((AdapterView<?> p, View view, int pos, long id) -> {
-            android.content.Intent intent = new Intent(this, MainActivity.class);
-            intent.setAction(android.content.Intent.ACTION_VIEW);
-            intent.setData(android.net.Uri.parse(rows.get(pos).url));
-            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            Intent intent = new Intent(this, MainActivity.class);
+            intent.setAction(Intent.ACTION_VIEW);
+            intent.setData(Uri.parse(rows.get(pos).url));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
             finish();
         });

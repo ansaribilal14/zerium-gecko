@@ -11,7 +11,7 @@ public class Utils {
         public Engine(String name, String query) { this.name = name; this.query = query; }
     }
 
-    private static final Engine[] ENGINES = {
+    public static final Engine[] ENGINES = {
             new Engine("DuckDuckGo", "https://duckduckgo.com/?q=%s"),
             new Engine("Startpage", "https://www.startpage.com/sp/search?query=%s"),
             new Engine("Brave Search", "https://search.brave.com/search?q=%s"),
