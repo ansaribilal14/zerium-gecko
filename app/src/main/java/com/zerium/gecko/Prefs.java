@@ -87,6 +87,10 @@ public class Prefs {
     public float readerTextScale() { return sp.getFloat("reader_text_scale", 1.0f); }
     public void readerTextScale(float v) { sp.edit().putFloat("reader_text_scale", v).apply(); }
 
+    /** HTTPS-only mode: 0 off, 1 private tabs only (default), 2 all tabs. */
+    public int httpsOnly() { return sp.getInt("https_only", 1); }
+    public void httpsOnly(int v) { sp.edit().putInt("https_only", v).apply(); }
+
     // Session restore: JSON [{"u": url, "s": sessionState}, ...]
     public String savedTabs() { return sp.getString("saved_tabs", ""); }
     public void savedTabs(String v) { sp.edit().putString("saved_tabs", v == null ? "" : v).apply(); }

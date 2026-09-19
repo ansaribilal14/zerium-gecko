@@ -24,7 +24,6 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
-import android.widget.PopupMenu;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -46,7 +45,9 @@ import org.mozilla.geckoview.GeckoRuntimeSettings;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
+import org.mozilla.geckoview.StorageController;
 import org.mozilla.geckoview.WebExtension;
+import org.mozilla.geckoview.WebExtensionController;
 import org.mozilla.geckoview.WebRequestError;
 
 import java.io.File;
@@ -86,6 +87,12 @@ public class MainActivity extends AppCompatActivity {
     private static final int MENU_BLOCK_INFO = 16;
     private static final int MENU_SETTINGS = 17;
     private static final int MENU_EXIT = 18;
+    private static final int MENU_ADDONS = 19;
+    private static final int MENU_DELETE_DATA = 20;
+    private static final int MENU_BACK = 21;
+    private static final int MENU_FORWARD = 22;
+    private static final int MENU_RELOAD = 23;
+    private static final int MENU_SHARE_QA = 24;
 
     private Prefs prefs;
     private GeckoRuntime runtime;
@@ -106,6 +113,8 @@ public class MainActivity extends AppCompatActivity {
     private View tabSwitcher;
     private RecyclerView tabsGrid;
     private TabsAdapter tabsAdapter;
+    private EditText tabSearch;
+    private TextView noMatchingTabs;
     private FrameLayout fullscreenContainer;
     private View fullscreenView;
     private GeckoSession fullscreenSession;
@@ -123,6 +132,12 @@ public class MainActivity extends AppCompatActivity {
     private final ActivityResultLauncher<Intent> fileLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),
                     result -> resolveFilePrompt(result));
+
+    /** ExtensionsActivity reads the runtime through this holder; the main
+     *  activity stays alive underneath it, so it is always valid there. */
+    public static volatile GeckoRuntime runtimeForAddons;
+    /** Add-on list refresh callback set by ExtensionsActivity. */
+    public static volatile Runnable addonListRefresh;
 
     private final TabManager tabs = new TabManager();
 
@@ -152,6 +167,8 @@ public class MainActivity extends AppCompatActivity {
         findCount = findViewById(R.id.findCount);
         tabSwitcher = findViewById(R.id.tabSwitcher);
         tabsGrid = findViewById(R.id.tabsGrid);
+        tabSearch = findViewById(R.id.searchTabs);
+        noMatchingTabs = findViewById(R.id.noMatchingTabs);
 
         fullscreenContainer = new FrameLayout(this);
         fullscreenContainer.setBackgroundColor(0xFF000000);
@@ -267,6 +284,16 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         tabsGrid.setAdapter(tabsAdapter);
+        tabSearch.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void afterTextChanged(android.text.Editable s) {
+                tabsAdapter.filter(s.toString());
+                noMatchingTabs.setVisibility(tabsAdapter.getItemCount() == 0
+                        ? View.VISIBLE : View.GONE);
+            }
+        });
+        findViewById(R.id.btnSwitcherData).setOnClickListener(v -> deleteBrowsingData());
         findViewById(R.id.btnNewTab).setOnClickListener(v -> {
             hideTabSwitcher();
             openTab(null, false);
@@ -301,10 +328,13 @@ public class MainActivity extends AppCompatActivity {
                 .contentBlocking(cb.build())
                 .preferredColorScheme(scheme)
                 .fontSizeFactor(prefs.fontSizeFactor())
+                .allowInsecureConnections(httpsOnlyConstant())
                 .aboutConfigEnabled(false)
                 .debugLogging(false)
                 .build());
+        runtimeForAddons = runtime;
         applyLocales();
+        installExtensionDelegates();
         runtime.getWebExtensionController().ensureBuiltIn(EXTENSION_LOCATION, EXTENSION_ID)
                 .then(ext -> {
                     shield = ext;
@@ -349,6 +379,148 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception ignored) {}
     }
 
+    private @GeckoRuntimeSettings.HttpsOnlyMode int httpsOnlyConstant() {
+        switch (prefs.httpsOnly()) {
+            case 0: return GeckoRuntimeSettings.ALLOW_ALL;
+            case 2: return GeckoRuntimeSettings.HTTPS_ONLY;
+            default: return GeckoRuntimeSettings.HTTPS_ONLY_PRIVATE;
+        }
+    }
+
+    /**
+     * Controller-level delegates for the add-on platform:
+     * install/optional/update permission prompts (mandatory — without a
+     * PromptDelegate, installs never complete) and a state-change hook
+     * the Add-ons screen listens to.
+     */
+    private void installExtensionDelegates() {
+        WebExtensionController c = runtime.getWebExtensionController();
+        c.setPromptDelegate(new WebExtensionController.PromptDelegate() {
+            @Override
+            public GeckoResult<WebExtension.PermissionPromptResponse> onInstallPromptRequest(
+                    @NonNull WebExtension extension,
+                    @NonNull String[] permissions,
+                    @NonNull String[] origins) {
+                return askAddonPermissions(extension, permissions, origins);
+            }
+
+            @Override
+            public GeckoResult<AllowOrDeny> onOptionalPrompt(
+                    @NonNull WebExtension extension,
+                    @NonNull String[] permissions,
+                    @NonNull String[] origins) {
+                return askAddonAllowDeny(getString(R.string.addons_install_confirm,
+                        addonName(extension)), permissions, origins);
+            }
+
+            @Override
+            public GeckoResult<AllowOrDeny> onUpdatePrompt(
+                    @NonNull WebExtension currentlyInstalled,
+                    @NonNull WebExtension updatedExtension,
+                    @NonNull String[] newPermissions,
+                    @NonNull String[] newOrigins) {
+                return askAddonAllowDeny(getString(R.string.addons_install_confirm,
+                        addonName(updatedExtension)), newPermissions, newOrigins);
+            }
+        });
+        c.setAddonManagerDelegate(new WebExtensionController.AddonManagerDelegate() {
+            @Override
+            public void onInstalled(@NonNull WebExtension extension) {
+                notifyAddonListChanged();
+            }
+
+            @Override
+            public void onUninstalled(@NonNull WebExtension extension) {
+                notifyAddonListChanged();
+            }
+
+            @Override
+            public void onEnabled(@NonNull WebExtension extension) {
+                notifyAddonListChanged();
+            }
+
+            @Override
+            public void onDisabled(@NonNull WebExtension extension) {
+                notifyAddonListChanged();
+            }
+
+            @Override
+            public void onReady(@NonNull WebExtension extension) {
+                notifyAddonListChanged();
+            }
+        });
+    }
+
+    private static String addonName(WebExtension ext) {
+        if (ext == null || ext.metaData == null
+                || ext.metaData.name == null || ext.metaData.name.isEmpty()) {
+            return ext == null || ext.id == null ? "add-on" : ext.id;
+        }
+        return ext.metaData.name;
+    }
+
+    private void notifyAddonListChanged() {
+        Runnable r = addonListRefresh;
+        if (r != null) runOnUiThread(r);
+    }
+
+    /** Install-time permission dialog: permission list + private-mode grant. */
+    private GeckoResult<WebExtension.PermissionPromptResponse> askAddonPermissions(
+            WebExtension ext, String[] permissions, String[] origins) {
+        final GeckoResult<WebExtension.PermissionPromptResponse> out = new GeckoResult<>();
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (20 * getResources().getDisplayMetrics().density);
+        box.setPadding(pad, pad / 2, pad, 0);
+        StringBuilder body = new StringBuilder();
+        if (permissions.length == 0 && origins.length == 0) {
+            body.append(getString(R.string.addons_permissions_none));
+        } else {
+            for (String p : permissions) body.append("\u2022 ").append(p).append('\n');
+            for (String o : origins) body.append("\u2022 ").append(o).append('\n');
+        }
+        TextView msg = new TextView(this);
+        msg.setText(body.toString());
+        box.addView(msg);
+        android.widget.CheckBox priv = new android.widget.CheckBox(this);
+        priv.setText(R.string.addons_allow_private);
+        box.addView(priv);
+        TextView hint = new TextView(this);
+        hint.setText(R.string.addons_private_hint);
+        hint.setTextSize(12);
+        hint.setTextColor(ContextCompat.getColor(this, R.color.on_surface_variant));
+        box.addView(hint);
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.addons_install_confirm, addonName(ext)))
+                .setView(box)
+                .setPositiveButton(R.string.addons_install, (d, w) ->
+                        out.complete(new WebExtension.PermissionPromptResponse(true, priv.isChecked())))
+                .setNegativeButton(R.string.cancel, (d, w) ->
+                        out.complete(new WebExtension.PermissionPromptResponse(false, false)))
+                .setOnCancelListener(d ->
+                        out.complete(new WebExtension.PermissionPromptResponse(false, false)))
+                .show();
+        return out;
+    }
+
+    /** Optional/update permission dialog: plain Allow / Deny. */
+    private GeckoResult<AllowOrDeny> askAddonAllowDeny(String title,
+                                                       String[] permissions, String[] origins) {
+        final GeckoResult<AllowOrDeny> out = new GeckoResult<>();
+        StringBuilder body = new StringBuilder();
+        for (String p : permissions) body.append("\u2022 ").append(p).append('\n');
+        for (String o : origins) body.append("\u2022 ").append(o).append('\n');
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(body.length() == 0 ? getString(R.string.addons_permissions_none)
+                        : body.toString())
+                .setPositiveButton(R.string.perm_allow, (d, w) -> out.complete(AllowOrDeny.ALLOW))
+                .setNegativeButton(R.string.perm_deny, (d, w) -> out.complete(AllowOrDeny.DENY))
+                .setOnCancelListener(d -> out.complete(AllowOrDeny.DENY))
+                .show();
+        return out;
+    }
+
     /** Re-applies every runtime-level setting from prefs (after Settings). */
     private void applyRuntimeSettings() {
         if (runtime == null) return;
@@ -360,6 +532,7 @@ public class MainActivity extends AppCompatActivity {
                     : org.mozilla.geckoview.ContentBlocking.CookieBannerMode.COOKIE_BANNER_MODE_DISABLED;
             runtime.getSettings().getContentBlocking().setCookieBannerMode(cbMode);
             runtime.getSettings().getContentBlocking().setCookieBannerModePrivateBrowsing(cbMode);
+            runtime.getSettings().setAllowInsecureConnections(httpsOnlyConstant());
             applyLocales();
         } catch (Exception ignored) {}
     }
@@ -1457,67 +1630,162 @@ public class MainActivity extends AppCompatActivity {
         return t.url == null ? "" : t.url;
     }
 
-    /** Minimal generated start page (same spirit as the WebView edition). */
+    /** Brave-style start page: centered search, privacy-stats card, favorite
+     *  tiles with favicon overlay, DuckDuckGo suggestions while typing. */
     private String startPageHtml() {
         String action = Utils.engineAt(prefs, prefs.searchEngine()).query;
-        // Most-visited tiles (local history only) + the total block count.
+        // Tiles: bookmarks first, then most-visited hosts from local history.
         StringBuilder tiles = new StringBuilder();
+        java.util.LinkedHashSet<String> used = new java.util.LinkedHashSet<>();
         try {
-            for (String host : history.topHosts(8)) {
-                String letter = host.isEmpty() ? "?" : host.substring(0, 1).toUpperCase();
-                tiles.append("<a class='tile' href='https://")
-                        .append(android.net.Uri.encode(host))
-                        .append("/'><span class='tl'>").append(escHtml(letter))
-                        .append("</span><span class='th'>").append(escHtml(host))
-                        .append("</span></a>");
+            for (BookmarksDB.Entry b : bookmarks.all()) {
+                String host = Utils.hostOf(b.url);
+                if (host == null || host.isEmpty() || !used.add(host)) continue;
+                tiles.append(tileHtml(host, host, "https://", ""));
+                if (used.size() >= 8) break;
             }
         } catch (Exception ignored) {}
+        try {
+            for (String host : history.topHosts(8)) {
+                if (host == null || host.isEmpty() || !used.add(host)) continue;
+                tiles.append(tileHtml(host, host, "https://", ""));
+                if (used.size() >= 8) break;
+            }
+        } catch (Exception ignored) {}
+        // Honest privacy-stats estimates (Brave's conservative formula).
         long blocked = prefs.totalBlocked();
-        String stats = blocked > 0
-                ? "<div class='stats'>" + String.format(java.util.Locale.US,
-                        "%,d", blocked) + " trackers and ads blocked so far</div>"
-                : "";
+        String dataSaved = humanBytes(blocked * 50L * 1024L);
+        String timeSaved = humanTime(blocked * 50L);
+        String blockedFmt = String.format(java.util.Locale.US, "%,d", blocked);
         return "<!DOCTYPE html><html><head><meta charset='utf-8'>"
                 + "<meta name='viewport' content='width=device-width,initial-scale=1'>"
                 + "<style>body{font-family:system-ui,sans-serif;background:#f6f7fb;color:#1b1b1f;"
-                + "display:flex;flex-direction:column;align-items:center;justify-content:center;"
-                + "min-height:100vh;margin:0;padding:24px}"
+                + "display:flex;flex-direction:column;align-items:center;"
+                + "min-height:100vh;margin:0;padding:28px 24px 40px}"
                 + ".logo{font-size:40px;font-weight:800;letter-spacing:-1.5px;background:"
                 + "linear-gradient(135deg,#4355b9,#7c9cff);-webkit-background-clip:text;"
-                + "background-clip:text;color:transparent}"
-                + ".tag{color:#5f5f6b;font-size:13px;margin:8px 0 30px}"
+                + "background-clip:text;color:transparent;margin-top:2vh}"
                 + ".search{display:flex;align-items:center;background:#fff;border:1px solid #e2e2ea;"
-                + "border-radius:28px;padding:4px 4px 4px 18px;width:100%;max-width:580px;"
-                + "box-shadow:0 8px 28px rgba(20,25,60,.07)}"
+                + "border-radius:28px;padding:4px 4px 4px 18px;width:100%;max-width:580px;margin-top:26px;"
+                + "box-shadow:0 8px 28px rgba(20,25,60,.07);position:relative}"
                 + "input{flex:1;min-width:0;padding:13px 12px;font-size:16px;border:0;outline:none;"
                 + "background:transparent;color:#1b1b1f}"
                 + "button{flex:none;border:0;border-radius:22px;padding:11px 22px;font-size:14px;"
                 + "font-weight:600;color:#fff;background:#4355b9}"
+                + ".sug{position:absolute;left:0;right:0;top:calc(100% + 6px);background:#fff;"
+                + "border:1px solid #e2e2ea;border-radius:16px;box-shadow:0 12px 32px rgba(20,25,60,.12);"
+                + "overflow:hidden;display:none;z-index:5;text-align:left}"
+                + ".sug a{display:block;padding:11px 18px;font-size:14px;color:#1b1b1f;"
+                + "text-decoration:none}.sug a:hover{background:#f3f3f8}"
+                + ".note{font-size:11px;color:#9a9aa6;margin-top:8px;display:none}"
+                + ".pstats{margin-top:30px;width:100%;max-width:580px;border-radius:20px;padding:16px 8px;"
+                + "background:linear-gradient(135deg,rgba(67,85,185,.10),rgba(124,156,255,.10));"
+                + "border:1px solid rgba(67,85,185,.14)}"
+                + ".phead{display:flex;align-items:center;gap:8px;padding:0 14px 10px;font-size:13px;"
+                + "color:#5f5f6b;font-weight:600}"
+                + ".prow{display:flex}"
+                + ".pcol{flex:1;text-align:center;padding:2px 6px}"
+                + ".pnum{font-size:26px;font-weight:800}"
+                + ".pnum.b{color:#e8710a}.pnum.d{color:#7c9cff}.pnum.t{color:#4355b9}"
+                + ".plbl{font-size:11px;color:#5f5f6b;margin-top:3px;line-height:1.35}"
                 + ".tiles{display:grid;grid-template-columns:repeat(4,minmax(64px,86px));gap:10px;"
-                + "margin-top:34px;width:100%;max-width:580px}"
+                + "margin-top:26px;width:100%;max-width:580px}"
                 + ".tile{display:flex;flex-direction:column;align-items:center;gap:6px;text-decoration:none;"
                 + "background:#fff;border:1px solid #e2e2ea;border-radius:16px;padding:12px 4px;"
                 + "box-shadow:0 4px 14px rgba(20,25,60,.05)}"
-                + ".tl{width:30px;height:30px;border-radius:10px;background:linear-gradient(135deg,#4355b9,#7c9cff);"
-                + "color:#fff;font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:center}"
+                + ".ic{position:relative;width:34px;height:34px;border-radius:50%;overflow:hidden;"
+                + "background:linear-gradient(135deg,#4355b9,#7c9cff);display:flex;align-items:center;"
+                + "justify-content:center}"
+                + ".ic .g{color:#fff;font-weight:700;font-size:15px}"
+                + ".ic img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;"
+                + "background:#fff}"
                 + ".th{font-size:10px;color:#5f5f6b;max-width:100%;overflow:hidden;text-overflow:ellipsis;"
                 + "white-space:nowrap}"
-                + ".stats{margin-top:26px;font-size:12px;color:#5f5f6b}"
+                + ".foot{margin-top:26px;font-size:11px;color:#9a9aa6;text-align:center;max-width:420px;line-height:1.5}"
                 + "@media (prefers-color-scheme:dark){body{background:#0e1016;color:#e4e2e6}"
                 + ".search{background:#171a23;border-color:#2a2d38}input{color:#e4e2e6}"
-                + ".tile{background:#171a23;border-color:#2a2d38}.stats{color:#9a9aa6}}"
+                + ".sug{background:#171a23;border-color:#2a2d38}.sug a{color:#e4e2e6}.sug a:hover{background:#1f232e}"
+                + ".tile{background:#171a23;border-color:#2a2d38}"
+                + ".pstats{background:linear-gradient(135deg,rgba(124,156,255,.10),rgba(67,85,185,.14));"
+                + "border-color:rgba(124,156,255,.18)}"
+                + ".phead{color:#9a9aa6}.plbl{color:#9a9aa6}.th{color:#9a9aa6}"
+                + ".pnum.d{color:#7c9cff}.pnum.t{color:#b6c4ff}.ic img{background:#e4e2e6}}"
                 + "</style></head><body>"
                 + "<div class='logo'>Zerium&nbsp;G</div>"
-                + "<div class='tag'>Gecko engine &middot; engine-level blocking &middot; open source</div>"
                 + "<form onsubmit='var q=document.getElementById(\"q\").value.trim();"
                 + "if(q){var t=\"" + action + "\";location.href=t.replace(\"%s\",encodeURIComponent(q));}"
                 + "return false'>"
                 + "<div class='search'><input id='q' type='search' placeholder='"
-                + getString(R.string.search_hint) + "' autofocus><button type='submit'>Go</button>"
+                + getString(R.string.search_hint) + "' autocomplete='off'><button type='submit'>Go</button>"
+                + "<div class='sug' id='sug'></div></div>"
+                + "<div class='note' id='note'>" + escHtml(getString(R.string.start_suggestions_note))
                 + "</div></form>"
+                + "<div class='pstats'>"
+                + "<div class='phead'>\uD83D\uDEE1 " + escHtml(getString(R.string.stats_title)) + "</div>"
+                + "<div class='prow'>"
+                + "<div class='pcol'><div class='pnum b'>" + blockedFmt + "</div>"
+                + "<div class='plbl'>" + escHtml(getString(R.string.stats_blocked)) + "</div></div>"
+                + "<div class='pcol'><div class='pnum d'>" + escHtml(dataSaved) + "</div>"
+                + "<div class='plbl'>" + escHtml(getString(R.string.stats_data)) + "</div></div>"
+                + "<div class='pcol'><div class='pnum t'>" + escHtml(timeSaved) + "</div>"
+                + "<div class='plbl'>" + escHtml(getString(R.string.stats_time)) + "</div></div>"
+                + "</div></div>"
                 + (tiles.length() > 0 ? "<div class='tiles'>" + tiles + "</div>" : "")
-                + stats
+                + "<div class='foot'>" + escHtml(getString(R.string.stats_note)) + "</div>"
+                + suggestionJs()
                 + "</body></html>";
+    }
+
+    private static String tileHtml(String host, String label, String scheme, String extra) {
+        String letter = host.isEmpty() ? "?" : host.substring(0, 1).toUpperCase();
+        String safeHost = escHtml(android.net.Uri.encode(host));
+        String safeLabel = escHtml(label.length() > 18 ? label.substring(0, 17) + "\u2026" : label);
+        String safeLetter = escHtml(letter);
+        return "<a class='tile' href='" + scheme + safeHost + "/'>"
+                + "<span class='ic'><span class='g'>" + safeLetter + "</span>"
+                + "<img src='" + scheme + safeHost + "/favicon.ico' loading='lazy' onerror=\"this.remove()\"></span>"
+                + "<span class='th'>" + safeLabel + "</span></a>";
+    }
+
+    /** DuckDuckGo typeahead for the start-page search box (only fires while
+     *  the user types there; fails silently offline). */
+    private static String suggestionJs() {
+        return "<script>(function(){var i=document.getElementById('q'),s=document.getElementById('sug'),"
+                + "n=document.getElementById('note'),t=null;"
+                + "if(!i||!s)return;"
+                + "function esc(x){return x.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}"
+                + "i.addEventListener('input',function(){var q=i.value.trim();clearTimeout(t);"
+                + "if(!q){s.style.display='none';n.style.display='none';return}"
+                + "t=setTimeout(function(){fetch('https://duckduckgo.com/ac/?q='+encodeURIComponent(q)+'&type=list')"
+                + ".then(function(r){return r.json()}).then(function(d){var list=(d&&d[1])||[];"
+                + "var h='';for(var k=0;k<list.length&&k<6;k++){h+='<a href=\"#\" data-q=\"'"
+                + "+esc(list[k])+'\">'+esc(list[k])+'</a>'}"
+                + "if(h){s.innerHTML=h;s.style.display='block';n.style.display='block'}"
+                + "else{s.style.display='none';n.style.display='none'}})"
+                + ".catch(function(){s.style.display='none';n.style.display='none'})},140)});"
+                + "s.addEventListener('click',function(e){var a=e.target.closest('a');if(!a)return;"
+                + "e.preventDefault();i.value=a.getAttribute('data-q');"
+                + "var f=i.closest('form');if(f)f.requestSubmit?f.requestSubmit():f.onsubmit({preventDefault:function(){}})})})()"
+                + "</script>";
+    }
+
+    /** Honest estimate strings for the privacy-stats card. */
+    private static String humanBytes(long bytes) {
+        if (bytes <= 0) return "0 B";
+        if (bytes < 1024) return bytes + " B";
+        double kb = bytes / 1024.0;
+        if (kb < 1024) return String.format(java.util.Locale.US, "%.1f KB", kb);
+        double mb = kb / 1024.0;
+        if (mb < 1024) return String.format(java.util.Locale.US, "%.1f MB", mb);
+        return String.format(java.util.Locale.US, "%.1f GB", mb / 1024.0);
+    }
+
+    private static String humanTime(long ms) {
+        if (ms <= 0) return "0s";
+        if (ms < 60_000) return (ms / 1000) + "s";
+        long min = ms / 60_000;
+        if (min < 60) return min + "m";
+        return (min / 60) + "h";
     }
 
     private static String escHtml(String s) {
@@ -1677,41 +1945,49 @@ public class MainActivity extends AppCompatActivity {
     // ---------- Menu ----------
 
     private void showMenu(View anchor) {
-        PopupMenu pm = new PopupMenu(this, anchor);
         Tab t = tabs.currentTab();
-        pm.getMenu().add(0, MENU_NEW_TAB, 0, R.string.menu_new_tab);
-        pm.getMenu().add(0, MENU_NEW_INCOGNITO, 1, R.string.menu_new_incognito);
-        pm.getMenu().add(0, MENU_BOOKMARK_ADD, 2, isCurrentBookmarked()
-                ? R.string.menu_remove_bookmark : R.string.menu_add_bookmark);
-        pm.getMenu().add(0, MENU_BOOKMARKS, 3, R.string.menu_bookmarks);
-        pm.getMenu().add(0, MENU_HISTORY, 4, R.string.menu_history);
-        pm.getMenu().add(0, MENU_DOWNLOADS, 5, R.string.menu_downloads);
-        pm.getMenu().add(0, MENU_FIND, 6, R.string.menu_find);
-        pm.getMenu().add(0, MENU_READER, 7, t != null && t.readerActive
-                ? R.string.menu_reader_exit : R.string.menu_reader)
-                .setEnabled(t != null && (t.readerActive || t.readerArticle != null));
-        pm.getMenu().add(0, MENU_DESKTOP, 8, R.string.menu_desktop)
-                .setCheckable(true).setChecked(t != null && isDesktop(t));
-        pm.getMenu().add(0, MENU_JS, 9, R.string.menu_javascript)
-                .setCheckable(true)
-                .setChecked(t != null && t.session.getSettings().getAllowJavascript());
-        pm.getMenu().add(0, MENU_TRANSLATE, 10, R.string.menu_translate)
-                .setEnabled(t != null && !isStartPage(t));
-        pm.getMenu().add(0, MENU_PRINT, 11, R.string.menu_print)
-                .setEnabled(t != null && !isStartPage(t));
-        pm.getMenu().add(0, MENU_SAVE_PDF, 12, R.string.menu_save_pdf)
-                .setEnabled(t != null && !isStartPage(t));
-        pm.getMenu().add(0, MENU_SHARE, 13, R.string.menu_share);
-        pm.getMenu().add(0, MENU_ALLOW_SITE, 14, R.string.menu_allow_site)
-                .setEnabled(t != null && !isStartPage(t));
-        pm.getMenu().add(0, MENU_BLOCK_INFO, 15, R.string.menu_block_info);
-        pm.getMenu().add(0, MENU_SETTINGS, 16, R.string.menu_settings);
-        pm.getMenu().add(0, MENU_EXIT, 17, R.string.menu_exit);
-        pm.setOnMenuItemClickListener(item -> {
-            handleMenu(item.getItemId());
-            return true;
-        });
-        pm.show();
+        boolean onPage = t != null && !isStartPage(t);
+        java.util.List<MenuSheet.Entry> entries = new ArrayList<>();
+        // Quick actions (Brave-style circular row).
+        entries.add(MenuSheet.action(MENU_BACK, R.string.qa_back, R.drawable.ic_back,
+                t != null && t.canGoBack));
+        entries.add(MenuSheet.action(MENU_FORWARD, R.string.qa_forward, R.drawable.ic_forward,
+                t != null && t.canGoForward));
+        entries.add(MenuSheet.action(MENU_RELOAD, R.string.qa_refresh, R.drawable.ic_refresh, onPage));
+        entries.add(MenuSheet.action(MENU_SHARE_QA, R.string.qa_share, R.drawable.ic_share, onPage));
+        entries.add(MenuSheet.divider());
+        // Browsing
+        entries.add(MenuSheet.item(MENU_NEW_TAB, R.string.menu_new_tab, R.drawable.ic_plus));
+        entries.add(MenuSheet.item(MENU_NEW_INCOGNITO, R.string.menu_new_incognito, R.drawable.ic_incognito));
+        entries.add(MenuSheet.divider());
+        entries.add(MenuSheet.item(MENU_BOOKMARK_ADD, isCurrentBookmarked()
+                        ? R.string.menu_remove_bookmark : R.string.menu_add_bookmark,
+                R.drawable.ic_bookmark, onPage));
+        entries.add(MenuSheet.item(MENU_BOOKMARKS, R.string.menu_bookmarks, R.drawable.ic_bookmark));
+        entries.add(MenuSheet.item(MENU_HISTORY, R.string.menu_history, R.drawable.ic_history));
+        entries.add(MenuSheet.item(MENU_DOWNLOADS, R.string.menu_downloads, R.drawable.ic_download));
+        entries.add(MenuSheet.item(MENU_FIND, R.string.menu_find, R.drawable.ic_search, onPage));
+        entries.add(MenuSheet.divider());
+        // Page tools
+        entries.add(MenuSheet.item(MENU_READER, t != null && t.readerActive
+                        ? R.string.menu_reader_exit : R.string.menu_reader,
+                R.drawable.ic_reader, t != null && (t.readerActive || t.readerArticle != null)));
+        entries.add(MenuSheet.check(MENU_DESKTOP, R.string.menu_desktop, R.drawable.ic_desktop,
+                t != null && isDesktop(t)));
+        entries.add(MenuSheet.check(MENU_JS, R.string.menu_javascript, R.drawable.ic_code,
+                t != null && t.session.getSettings().getAllowJavascript()));
+        entries.add(MenuSheet.item(MENU_TRANSLATE, R.string.menu_translate, R.drawable.ic_translate, onPage));
+        entries.add(MenuSheet.item(MENU_PRINT, R.string.menu_print, R.drawable.ic_print, onPage));
+        entries.add(MenuSheet.item(MENU_SAVE_PDF, R.string.menu_save_pdf, R.drawable.ic_pdf, onPage));
+        entries.add(MenuSheet.item(MENU_ALLOW_SITE, R.string.menu_allow_site, R.drawable.ic_allow, onPage));
+        entries.add(MenuSheet.item(MENU_BLOCK_INFO, R.string.menu_block_info, R.drawable.ic_shield));
+        entries.add(MenuSheet.divider());
+        // App
+        entries.add(MenuSheet.item(MENU_ADDONS, R.string.menu_addons, R.drawable.ic_extension));
+        entries.add(MenuSheet.item(MENU_DELETE_DATA, R.string.menu_delete_data, R.drawable.ic_trash));
+        entries.add(MenuSheet.item(MENU_SETTINGS, R.string.menu_settings, R.drawable.ic_gear));
+        entries.add(MenuSheet.item(MENU_EXIT, R.string.menu_exit, R.drawable.ic_exit));
+        MenuSheet.show(this, entries, e -> handleMenu(e.id));
     }
 
     private boolean isCurrentBookmarked() {
@@ -1763,6 +2039,31 @@ public class MainActivity extends AppCompatActivity {
                 break;
             case MENU_ALLOW_SITE: allowCurrentSite(); break;
             case MENU_BLOCK_INFO: showBlockInfo(); break;
+            case MENU_ADDONS:
+                startActivity(new Intent(this, ExtensionsActivity.class));
+                break;
+            case MENU_DELETE_DATA: deleteBrowsingData(); break;
+            case MENU_BACK: {
+                if (t != null && t.canGoBack) t.session.goBack();
+                break;
+            }
+            case MENU_FORWARD: {
+                if (t != null && t.canGoForward) t.session.goForward();
+                break;
+            }
+            case MENU_RELOAD: {
+                if (t != null && !isStartPage(t)) t.session.reload();
+                break;
+            }
+            case MENU_SHARE_QA: {
+                if (t != null && !isStartPage(t)) {
+                    Intent qa = new Intent(Intent.ACTION_SEND);
+                    qa.setType("text/plain");
+                    qa.putExtra(Intent.EXTRA_TEXT, pageUrl(t));
+                    startActivity(Intent.createChooser(qa, getString(R.string.menu_share)));
+                }
+                break;
+            }
             case MENU_SETTINGS:
                 startActivityForResult(new Intent(this, SettingsActivity.class), 101);
                 break;
@@ -1778,6 +2079,48 @@ public class MainActivity extends AppCompatActivity {
                         t == null ? 0 : t.blockedOnPage,
                         prefs.totalBlocked()))
                 .setPositiveButton(R.string.ok, null)
+                .show();
+    }
+
+    /** Brave-style "Delete browsing data": history, cookies/site data and
+     *  engine caches, via the engine StorageController. */
+    private void deleteBrowsingData() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (20 * getResources().getDisplayMetrics().density);
+        box.setPadding(pad, pad / 2, pad, 0);
+        android.widget.CheckBox historyBox = new android.widget.CheckBox(this);
+        historyBox.setText(R.string.delete_data_history);
+        historyBox.setChecked(true);
+        android.widget.CheckBox siteBox = new android.widget.CheckBox(this);
+        siteBox.setText(R.string.delete_data_site_data);
+        siteBox.setChecked(true);
+        android.widget.CheckBox cacheBox = new android.widget.CheckBox(this);
+        cacheBox.setText(R.string.delete_data_cache);
+        cacheBox.setChecked(true);
+        box.addView(historyBox);
+        box.addView(siteBox);
+        box.addView(cacheBox);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.delete_data_title)
+                .setView(box)
+                .setPositiveButton(R.string.delete, (d, w) -> {
+                    if (historyBox.isChecked()) new HistoryDB(this).clear();
+                    long flags = 0;
+                    if (siteBox.isChecked()) flags |= StorageController.ClearFlags.COOKIES
+                            | StorageController.ClearFlags.DOM_STORAGES
+                            | StorageController.ClearFlags.AUTH_SESSIONS;
+                    if (cacheBox.isChecked()) flags |= StorageController.ClearFlags.ALL_CACHES;
+                    if (flags != 0) {
+                        runtime.getStorageController().clearData(flags).then(v -> {
+                            runOnUiThread(() -> toast(R.string.delete_data_done));
+                            return null;
+                        });
+                    } else {
+                        toast(R.string.delete_data_done);
+                    }
+                })
+                .setNegativeButton(R.string.cancel, null)
                 .show();
     }
 
@@ -1940,6 +2283,8 @@ public class MainActivity extends AppCompatActivity {
         hideFindBar();
         Tab current = tabs.currentTab();
         if (current != null && !current.incognito && !isStartPage(current)) capturePreview(current);
+        tabSearch.setText("");
+        noMatchingTabs.setVisibility(View.GONE);
         tabsAdapter.notifyDataSetChanged();
         tabSwitcher.setVisibility(View.VISIBLE);
         hideKeyboard();
@@ -2042,6 +2387,8 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         deleteReaderFile();
+        runtimeForAddons = null;
+        addonListRefresh = null;
     }
 
     @Override

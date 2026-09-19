@@ -2,6 +2,28 @@
 
 All notable changes to Zerium G are documented in this file (Keep a Changelog format). Stable builds are published as immutable `vX.Y.Z` releases; the rolling `latest` tag tracks the newest successful build of `main`.
 
+## [1.2.0] — 2026-09-19
+
+Brave-inspired UI overhaul, an add-on platform, and a stronger engine-level YouTube blocker.
+
+### Added
+- **Add-ons (WebExtensions)** — a full extension manager in the Gecko engine. Installed add-ons list with icons, names and versions; enable/disable, allow-in-private-browsing and uninstall per add-on; the built-in Zerium G Shield is pinned (disable-able, not removable). Installs come from a curated AMO catalog (uBlock Origin, Dark Reader, SponsorBlock, Privacy Badger, Bitwarden, I don't care about cookies, LocalCDN, Decentraleyes — resolved to the current signed package through the public AMO v5 API at install time) or from a local `.xpi` file. Install-time permission prompts (with a private-mode grant checkbox), optional/update permission prompts, and honest engine error mapping (unsigned packages are rejected with a clear explanation — Gecko enforces Mozilla signatures).
+- **Brave-style menu** — the old popup menu is now a sectioned bottom sheet: a circular quick-action row (back / forward / refresh / share), then sections for browsing, page tools (reader, desktop site, JavaScript, translate, print, save as PDF, per-site blocking) and app entries (Add-ons, Delete browsing data, Settings, Exit).
+- **Brave-style start page** — a three-metric **Privacy Stats** card (Trackers & Ads Blocked, Est. Data Saved, Est. Time Saved), favicon tiles with letter-monogram fallback (bookmarks first, then most-visited local history), and search suggestions from DuckDuckGo's suggestion endpoint while typing on the start page only (labelled in the UI; nothing fires anywhere else).
+- **Delete browsing data** — Brave-style dialog with history, cookies/site data and caches; the engine `StorageController` clears cookies, DOM storages, auth sessions and image/network caches. Reachable from the menu and the tab switcher.
+- **Search your tabs** — the tab switcher (already grid + live previews) gained Brave's filter bar over open-tab titles and URLs, with an empty state.
+- **HTTPS-only mode** — off / private tabs only (default) / all tabs, through the engine's `allowInsecureConnections`; applied live from Settings.
+- **Curated YouTube engine filters** — the shield rules now include YouTube ad/telemetry endpoint blocks (`/api/stats/ads`, `/pagead/`, `/ptracking`, `/get_midroll_info`, `/error_204`, `static.doubleclick.net`) and the ad-tier segment marker `ctier=` as URL patterns, on top of the InnerTube response pruning and the page script. The engine suite grew from 42 to 52 cases covering the new layer (ad-tier segments blocked, normal playback untouched).
+
+### Changed
+- Tab switcher header holds the delete-browsing-data shortcut; settings gained Add-ons and HTTPS-only rows.
+- Start-page search no longer autofocuses the keyboard on every new tab (Brave behavior), and the page keeps the engine's dark-scheme support.
+
+### Honest scope
+- Only **Mozilla-signed** add-ons install (the engine enforces it): the catalog is AMO-hosted, and locally picked files must be signed Firefox add-ons — Chrome `.crx` packages and unsigned builds are rejected by the engine. Action popups rendered by add-ons (e.g. toolbar popups) are engine-supported but not surfaced in the toolbar yet — tracked on the roadmap.
+- Privacy-stats data/time figures are honest estimates (≈50 KB and ≈50 ms per blocked request, Brave's published conservative formula), computed on-device and labelled "Est.".
+- Search suggestions call DuckDuckGo only while typing on the start page; the omnibox makes no suggestion requests.
+
 ## [1.1.0] — 2026-09-19
 
 Every honest limitation of v1.0.0 is resolved in this release, plus a batch of pro-grade features.

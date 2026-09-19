@@ -168,4 +168,69 @@
     <!-- Downloads -->
     <string name="downloads_empty">No downloads yet\nFiles you download appear here</string>
     <string name="downloads_legacy_hint">Saved in the app\'s downloads folder</string>
+
+    <!-- Brave-style menu sheet -->
+    <string name="menu_delete_data">Delete browsing data</string>
+    <string name="menu_addons">Add-ons</string>
+    <string name="qa_back">Back</string>
+    <string name="qa_forward">Forward</string>
+    <string name="qa_refresh">Refresh</string>
+    <string name="qa_share">Share</string>
+
+    <!-- Start page privacy stats (honest estimates, Brave formula) -->
+    <string name="stats_title">Privacy Stats</string>
+    <string name="stats_blocked">Trackers &amp; Ads Blocked</string>
+    <string name="stats_data">Est. Data Saved</string>
+    <string name="stats_time">Est. Time Saved</string>
+    <string name="stats_note">Estimates: ≈50 KB and ≈50 ms saved per blocked request (Brave\'s conservative formula). Stored only on this device.</string>
+    <string name="start_suggestions_note">Search suggestions come from DuckDuckGo only while you type here.</string>
+
+    <!-- Tab switcher -->
+    <string name="search_tabs">Search your tabs</string>
+    <string name="no_matching_tabs">No tabs match</string>
+
+    <!-- Delete browsing data -->
+    <string name="delete_data_title">Delete browsing data?</string>
+    <string name="delete_data_history">Browsing history</string>
+    <string name="delete_data_site_data">Cookies and site data</string>
+    <string name="delete_data_cache">Cached images and files</string>
+    <string name="delete_data_done">Selected browsing data deleted</string>
+    <string name="delete">Delete</string>
+
+    <!-- HTTPS-only mode -->
+    <string name="https_only">HTTPS-only mode</string>
+    <string-array name="https_only_modes">
+        <item>Off</item>
+        <item>Private tabs only</item>
+        <item>All tabs</item>
+    </string-array>
+
+    <!-- Add-ons (extensions) -->
+    <string name="addons_title">Add-ons</string>
+    <string name="addons_subtitle">WebExtensions run inside the Gecko engine</string>
+    <string name="addons_recommended">Recommended add-ons</string>
+    <string name="addons_installed_none">No optional add-ons installed yet</string>
+    <string name="addons_install_file">Install from file…</string>
+    <string name="addons_install">Add</string>
+    <string name="addons_remove">Remove</string>
+    <string name="addons_enabled">Enabled</string>
+    <string name="addons_disabled">Disabled</string>
+    <string name="addons_allow_private">Allow in private tabs</string>
+    <string name="addons_details">Add-on details</string>
+    <string name="addons_signed_by_mozilla">Signed by Mozilla</string>
+    <string name="addons_not_signed">Signature: unknown</string>
+    <string name="addons_built_in_note">Part of Zerium G. It can be disabled but not removed.</string>
+    <string name="addons_install_confirm">Add %1$s?</string>
+    <string name="addons_permissions_none">No special permissions required</string>
+    <string name="addons_private_hint">Add-ons allowed in private tabs keep working in private browsing.</string>
+    <string name="addons_install_ok">%1$s installed</string>
+    <string name="addons_install_failed">Installation failed: %1$s</string>
+    <string name="addons_install_started">Installing %1$s…</string>
+    <string name="addons_fetch_url_failed">Could not fetch the add-on package. Check your connection.</string>
+    <string name="addons_err_network">network failure</string>
+    <string name="addons_err_corrupt">the file is corrupt or not an add-on</string>
+    <string name="addons_err_unsigned">rejected: only Mozilla-signed add-ons from addons.mozilla.org can be installed</string>
+    <string name="addons_err_blocklisted">this add-on is blocklisted</string>
+    <string name="addons_err_generic">the add-on was rejected by the engine</string>
+    <string name="addons_shield_desc">Built-in engine-level ad and tracker blocking (hosts lists, EasyList subset, YouTube suppression, cosmetic CSS)</string>
 </resources>

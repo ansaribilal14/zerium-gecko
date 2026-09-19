@@ -24,11 +24,29 @@ public class TabsAdapter extends RecyclerView.Adapter<TabsAdapter.VH> {
     private final java.util.List<Tab> tabs;
     private final TabManager manager;
     private final Listener listener;
+    private String query = "";
 
     public TabsAdapter(java.util.List<Tab> tabs, TabManager manager, Listener listener) {
         this.tabs = tabs;
         this.manager = manager;
         this.listener = listener;
+    }
+
+    /** Brave-style "Search your tabs": case-insensitive title/URL filter. */
+    public void filter(String q) {
+        this.query = q == null ? "" : q.trim().toLowerCase();
+        notifyDataSetChanged();
+    }
+
+    private java.util.List<Tab> shown() {
+        if (query.isEmpty()) return tabs;
+        java.util.List<Tab> out = new java.util.ArrayList<>();
+        for (Tab t : tabs) {
+            String title = t.title == null ? "" : t.title.toLowerCase();
+            String url = t.url == null ? "" : t.url.toLowerCase();
+            if (title.contains(query) || url.contains(query)) out.add(t);
+        }
+        return out;
     }
 
     @NonNull
@@ -41,7 +59,7 @@ public class TabsAdapter extends RecyclerView.Adapter<TabsAdapter.VH> {
 
     @Override
     public void onBindViewHolder(@NonNull VH h, int position) {
-        final Tab t = tabs.get(position);
+        final Tab t = shown().get(position);
         h.title.setText(t.title == null || t.title.isEmpty() ? t.url : t.title);
         h.url.setText(displayHost(t));
         h.incognito.setVisibility(t.incognito ? View.VISIBLE : View.GONE);
@@ -68,7 +86,7 @@ public class TabsAdapter extends RecyclerView.Adapter<TabsAdapter.VH> {
     }
 
     @Override
-    public int getItemCount() { return tabs.size(); }
+    public int getItemCount() { return shown().size(); }
 
     static class VH extends RecyclerView.ViewHolder {
         final MaterialCardView card;

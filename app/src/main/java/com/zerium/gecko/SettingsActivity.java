@@ -62,6 +62,22 @@ public class SettingsActivity extends AppCompatActivity {
         });
         findViewById(R.id.rowPerms).setOnClickListener(v -> editPermissions());
         findViewById(R.id.rowAutofill).setOnClickListener(v -> openAutofillSettings());
+        findViewById(R.id.rowAddons).setOnClickListener(v ->
+                startActivity(new Intent(this, ExtensionsActivity.class)));
+        TextView httpsValue = findViewById(R.id.valueHttpsOnly);
+        String[] httpsModes = getResources().getStringArray(R.array.https_only_modes);
+        httpsValue.setText(httpsModes[Math.max(0, Math.min(prefs.httpsOnly(), 2))]);
+        findViewById(R.id.rowHttpsOnly).setOnClickListener(v -> {
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.https_only)
+                    .setSingleChoiceItems(httpsModes, prefs.httpsOnly(), (d, which) -> {
+                        prefs.httpsOnly(which);
+                        httpsValue.setText(httpsModes[which]);
+                        d.dismiss();
+                    })
+                    .setNegativeButton(R.string.cancel, null)
+                    .show();
+        });
         refreshPermSummary();
 
         // Privacy

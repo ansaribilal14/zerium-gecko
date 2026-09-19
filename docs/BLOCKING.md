@@ -16,10 +16,16 @@ The shield is a built-in WebExtension loaded from the APK assets (`resource://an
 
 - **79,963 hosts** — StevenBlack unified hosts (adware + malware + fakenews + gambling + tracking), MIT licensed.
 - **91,450 domains** — `||host^` network filters compiled from EasyList + EasyPrivacy (CC-BY-SA-3.0).
-- **11,577 path filters** — `||host/path…` rules with the supported option subset.
+- **11,585 path filters** — `||host/path…` rules with the supported option subset, **including a curated YouTube layer** (below).
 - **1,131 exceptions** — `@@` rules, including `$document` page-level exceptions.
-- **84 URL patterns** — the curated substring set from the Zerium Browser `AdBlocker` (deliberately conservative to avoid breaking page function).
+- **89 URL patterns** — the curated substring set from the Zerium Browser `AdBlocker` plus the YouTube ad-tier patterns (below).
 - **4,000 cosmetic selectors** — sanitized generic-hide subset of EasyList/EasyPrivacy.
+
+## The YouTube layer (three engine levels)
+
+1. **Curated endpoint filters** (v1.2.0): `||youtube.com/api/stats/ads^`, `||youtube.com/pagead/^`, `||youtube.com/ptracking^`, `||youtube.com/get_midroll_info^`, `||youtube.com/error_204^`, the `youtube-nocookie.com` variants and `static.doubleclick.net` are blocked at the network layer; the substring patterns `ctier=` (the ad-tier marker on googlevideo `videoplayback` segments, the same marker uBlock Origin uses) and `&adformat=` cancel ad media/creative requests. Normal playback segments are untouched — the engine suite asserts both directions.
+2. **InnerTube pruning**: player API responses are pruned of ad structures inside the engine before the page receives them.
+3. **Page script**: the WebView edition's v1.4.0 script (setter trap, XHR/fetch hooks, UI sweep, watchdog) runs at `document_start` as a second line of defense.
 
 ## Honest scope
 
