@@ -795,11 +795,7 @@ public class MainActivity extends AppCompatActivity {
             public GeckoResult<GeckoSession.PromptDelegate.PromptResponse> onAuthPrompt(
                     @NonNull GeckoSession s,
                     @NonNull GeckoSession.PromptDelegate.AuthPrompt prompt) {
-                boolean onlyPassword = false;
-                try {
-                    onlyPassword = (prompt.authOptions.flags
-                            & GeckoSession.PromptDelegate.AuthPrompt.AuthOptions.Flags.ONLY_PASSWORD) != 0;
-                } catch (Exception ignored) {}
+                final boolean onlyPassword = authOnlyPassword(prompt);
                 LinearLayout box = new LinearLayout(MainActivity.this);
                 box.setOrientation(LinearLayout.VERTICAL);
                 int pad = (int) (20 * getResources().getDisplayMetrics().density);
@@ -1052,9 +1048,10 @@ public class MainActivity extends AppCompatActivity {
                         prefs.rememberPermission(host, String.valueOf(perm.permission), -1);
                     }
                     if (value == GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW) {
+                        final int chosen = value;
                         allowNotifications(perm).then(v -> {
                             result.complete(v == GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW
-                                    ? value
+                                    ? chosen
                                     : GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY);
                             return null;
                         });
@@ -1087,6 +1084,16 @@ public class MainActivity extends AppCompatActivity {
         pendingContentAllow = true;
         permLauncher.launch(new String[]{Manifest.permission.POST_NOTIFICATIONS});
         return result;
+    }
+
+    /** True when the auth prompt only wants a password (AuthOptions flag). */
+    private static boolean authOnlyPassword(GeckoSession.PromptDelegate.AuthPrompt prompt) {
+        try {
+            return (prompt.authOptions.flags
+                    & GeckoSession.PromptDelegate.AuthPrompt.AuthOptions.Flags.ONLY_PASSWORD) != 0;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private String permissionLabel(int perm) {
