@@ -81,6 +81,7 @@ class MediaGrabberSheet : BottomSheetDialogFragment() {
     }
 
     companion object {
+        @JvmStatic
         fun show(fm: androidx.fragment.app.FragmentManager, tabId: Long) {
             val f = MediaGrabberSheet()
             val args = Bundle()

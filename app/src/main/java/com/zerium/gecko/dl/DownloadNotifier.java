@@ -12,6 +12,8 @@ import android.os.Build;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 
+import com.zerium.gecko.R;
+
 /**
  * Per-task download notifications: progress with pause/cancel actions,
  * completion with an Open action, failure with retry.

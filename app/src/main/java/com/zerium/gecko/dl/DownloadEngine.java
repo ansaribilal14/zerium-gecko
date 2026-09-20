@@ -6,6 +6,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
 
+import com.zerium.gecko.R;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -624,7 +626,7 @@ public final class DownloadEngine {
                 throws IOException {
             byte[] buf = new byte[65536];
             while (!isFinished(seg)) {
-                checkFlow();
+                guardFlow();
                 // Crash between write and offset bookkeeping would leave the
                 // segment file longer than seg.done — truncate to the recorded
                 // offset before appending again.
@@ -657,7 +659,7 @@ public final class DownloadEngine {
                     while ((n = is.read(buf)) > 0) {
                         os.write(buf, 0, n);
                         seg.done += n;
-                        checkFlow();
+                        guardFlow();
                     }
                 } finally {
                     c.disconnect();
@@ -728,11 +730,11 @@ public final class DownloadEngine {
             return request;
         }
 
-        // ----- Shared plumbing -----
-
-        private void checkFlow() {
-            if (request == Flow.PAUSE) throw new PauseSignal();
-            if (request == Flow.CANCEL) throw new CancelSignal();
+        /** Cooperative pause/cancel gate used by the HTTP segment loops. */
+        private void guardFlow() {
+            Flow f = request;
+            if (f == Flow.PAUSE) throw new PauseSignal();
+            if (f == Flow.CANCEL) throw new CancelSignal();
         }
 
         private class Probed {
