@@ -37,7 +37,7 @@ public class DownloadEngineDataTest {
                 CategoryResolver.resolve("https://x.example/seg", "video/mp2t", ""));
         assertEquals(CategoryResolver.AUDIO,
                 CategoryResolver.resolve("https://x.example/seg", "audio/ogg", ""));
-        assertEquals(CategoryResolver.OTHER,
+        assertEquals(CategoryResolver.DOC,
                 CategoryResolver.resolve("https://x.example/seg", "text/html", ""));
     }
 

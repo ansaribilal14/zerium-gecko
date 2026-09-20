@@ -23,7 +23,7 @@ public final class CategoryResolver {
     };
 
     private static final String[] VIDEO_EXT = {"mp4", "mkv", "webm", "mov", "avi",
-            "m4v", "3gp", "ts", "flv", "mpg", "mpeg", "wmv", "m4s"};
+            "m4v", "3gp", "ts", "flv", "mpg", "mpeg", "wmv", "m4s", "m3u8", "mpd"};
     private static final String[] AUDIO_EXT = {"mp3", "m4a", "aac", "ogg", "opus",
             "wav", "flac", "wma", "mid", "amr"};
     private static final String[] IMAGE_EXT = {"jpg", "jpeg", "png", "gif", "webp",
