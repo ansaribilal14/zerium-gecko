@@ -235,6 +235,7 @@
     <string name="addons_shield_desc">Built-in engine-level ad and tracker blocking (hosts lists, EasyList subset, YouTube suppression, cosmetic CSS)</string>
 
     <!-- Download manager -->
+    <string name="download_open_failed">Couldn\u2019t open the downloaded file</string>
     <string name="dl_channel_active">Downloads</string>
     <string name="dl_channel_done">Download results</string>
     <string name="dl_service_running">Downloading…</string>
