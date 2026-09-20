@@ -163,6 +163,18 @@ public class SettingsActivity extends AppCompatActivity {
             prefs.pullToRefresh(!prefs.pullToRefresh());
             return prefs.pullToRefresh();
         });
+        bindSwitch(R.id.swTurbo, prefs.turboDownloads(), () -> {
+            prefs.turboDownloads(!prefs.turboDownloads());
+            return prefs.turboDownloads();
+        });
+        bindSwitch(R.id.swMediaGrabber, prefs.mediaGrabber(), () -> {
+            prefs.mediaGrabber(!prefs.mediaGrabber());
+            return prefs.mediaGrabber();
+        });
+
+        // Appearance (Compose screen: theme mode, dynamic color, accent)
+        findViewById(R.id.rowAppearance).setOnClickListener(v ->
+                startActivity(new Intent(this, com.zerium.gecko.ui.AppearanceActivity.class)));
 
         // Data
         findViewById(R.id.rowClearHistory).setOnClickListener(v ->

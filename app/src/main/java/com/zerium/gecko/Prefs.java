@@ -35,6 +35,22 @@ public class Prefs {
     public int appTheme() { return sp.getInt("app_theme", 0); }
     public void appTheme(int v) { sp.edit().putInt("app_theme", v).apply(); }
 
+    // Appearance extras
+    /** Material You dynamic color on Android 12+. */
+    public boolean dynamicColor() { return sp.getBoolean("dynamic_color", true); }
+    public void dynamicColor(boolean v) { sp.edit().putBoolean("dynamic_color", v).apply(); }
+    /** Static accent (ARGB) for surfaces outside the dynamic palette; 0 = default indigo. */
+    public int accentColor() { return sp.getInt("accent_color", 0); }
+    public void accentColor(int v) { sp.edit().putInt("accent_color", v).apply(); }
+
+    // Downloads
+    /** Multi-connection (range) downloading for supported files. */
+    public boolean turboDownloads() { return sp.getBoolean("turbo_downloads", true); }
+    public void turboDownloads(boolean v) { sp.edit().putBoolean("turbo_downloads", v).apply(); }
+    /** In-page media detection feeding the media grabber. */
+    public boolean mediaGrabber() { return sp.getBoolean("media_grabber", true); }
+    public void mediaGrabber(boolean v) { sp.edit().putBoolean("media_grabber", v).apply(); }
+
     /** Search engine index into Utils.allEngines(prefs). */
     public int searchEngine() { return sp.getInt("search_engine", 0); }
     public void searchEngine(int v) { sp.edit().putInt("search_engine", v).apply(); }

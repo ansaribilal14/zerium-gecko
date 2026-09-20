@@ -37,7 +37,10 @@ Both apps keep the same honest-scope discipline: everything documented here is i
 - **Tabs with live previews and full session restore** — compositor-captured screenshots (never for private tabs), grid switcher, back/forward history preserved across app restarts.
 - **Pull-to-refresh that respects the page** — arms only at the actual top of a page (engine scroll position); edge-swipe tab switching.
 - **Find in page** — the engine Finder API with a real x/y counter.
-- **Downloads** — Content-Disposition downloads into the public Downloads collection, a downloads screen with sizes/dates, long-press image downloads via the extension.
+- **Turbo download engine** — a full download manager built into the browser: multi-connection range downloads (up to 8 connections per file where the server supports HTTP ranges, automatic single-connection fallback), pause/resume with persisted partial progress, a bounded download queue, automatic retry with backoff, and background downloading through a foreground service with per-task progress notifications (speed, ETA, pause/resume/cancel actions). Content-Disposition downloads are recorded in the same manager; files are organized into category folders under `Download/Zerium/` (Video, Audio, Images, Docs, Archives, APKs, Other).
+- **Media grabber** — "Media on this page" lists the videos, audio tracks, HLS/DASH playlists, direct file links and blob-backed players detected on the page by the shield extension's in-page scanner plus network-level response sniffing; one tap sends any item to the download engine. Blob-backed players are captured in-page and streamed to the app in chunks (300 MB cap). Encrypted (AES-128/SAMPLE-AES) and DRM-protected streams are honestly refused, never silently broken.
+- **Jetpack Compose (Material 3) surfaces** — the download manager, media grabber sheet and appearance screen are built with Jetpack Compose and Material 3, matching the app's tonal palette with Material You dynamic color and light/dark schemes.
+- **Appearance customization** — theme mode (System/Light/Dark), a Material You dynamic-color toggle (Android 12+), and six accent colors; applies instantly to the Compose screens (classic screens pick the palette up on next launch), stated honestly on the screen itself.
 - **Context menus, intent dispatch, honest error pages** — long-press links and images; intent:// and market fallbacks; certificate failures render an explicit error page, never bypassed silently.
 - **Custom search engines, text size, content language** — JSON-defined engines beside the six built-ins; 85–150% text scaling; content-language override.
 - **Bookmarks & history, start page tiles and block stats** — local SQLite only; most-visited tiles and the lifetime block counter on the start page.
@@ -46,7 +49,7 @@ Both apps keep the same honest-scope discipline: everything documented here is i
 - **Brave-style menu and start page** — a sectioned bottom-sheet menu with a circular quick-action row, a Privacy Stats card on the start page (Trackers & Ads Blocked / Est. Data Saved / Est. Time Saved — Brave's conservative ≈50 KB + ≈50 ms per-block formula, computed on-device), favicon tiles with monogram fallback, DuckDuckGo suggestions on the start-page search box only, "Search your tabs" filtering in the tab switcher, and a Delete-browsing-data dialog backed by the engine `StorageController`.
 - **HTTPS-only mode** — off / private tabs only / all tabs, applied live through the engine.
 
-## Honest limitations (v1.3.0)
+## Honest limitations (v1.4.0)
 
 The v1.0.0 list (denied permission prompts, no printing/PDF, no reader view, no autofill wiring, hosts-only blocking, no YouTube layer) and the v1.1.0 list (same, after the resolution release) are **fully resolved**. What remains honest to state:
 
@@ -57,6 +60,7 @@ The v1.0.0 list (denied permission prompts, no printing/PDF, no reader view, no 
 - Reader view parses the DOM snapshot at load: paywalled or JS-gated content yields what is actually in the DOM.
 - Reader-mode renders live in the app cache as a single HTML file and are deleted on exit; a crash between open and exit could leave one behind (app-private storage).
 - datetime-local / month / week form prompts are dismissed rather than approximated with a different control.
+- **Downloaded streams have real-world limits.** MSE/DASH media delivered as many small encrypted or indexed segments is only partially capturable; DRM (Widevine) streams are never downloadable. Multi-connection speedups only materialize when the server supports HTTP ranges. Blob capture needs the page's cooperation and is capped at 300 MB; on this edition it is relayed to the page through the extension's messaging, and where the engine does not support that relay the tap fails with an explicit message rather than a silent no-op. Torrents are not supported (no engine in-app).
 - Filter lists refresh with every release and CI regenerates them weekly; in-app manual refresh is on the roadmap.
 
 ## Installation

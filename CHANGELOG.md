@@ -2,6 +2,32 @@
 
 All notable changes to Zerium G are documented in this file (Keep a Changelog format). Stable builds are published as immutable `vX.Y.Z` releases; the rolling `latest` tag tracks the newest successful build of `main`.
 
+## [1.4.0] — 2026-09-20
+
+The Turbo Downloads release: a complete download manager with an in-page media grabber, plus Jetpack Compose (Material 3) screens and deeper appearance customization.
+
+### Added
+- **Turbo download engine** — downloads now run through Zerium G's own manager: multi-connection range downloads (up to 8 connections per file where the server supports ranges, automatic single-connection fallback when a server silently ignores ranges), pause and resume with persisted partial progress, a bounded queue (3 concurrent), automatic retry with backoff, and honest error mapping (403/404/range/encrypted/storage/network). Content-Disposition downloads (`onExternalResponse`) are saved as before and recorded in the same manager so everything lands in one list.
+- **Background downloads** — a foreground service keeps transfers running while you browse or leave the app; per-task notifications show live progress, speed and ETA with pause/resume/cancel actions, an Open action on completion and Retry on failure (notification permission requested on Android 13+).
+- **Media grabber** — a "Media on this page" menu entry lists videos, audio, HLS/DASH playlists, direct file links and blob-backed players detected by the shield extension's new in-page scanner content script plus network-level response sniffing (background `webRequest` observer); each row downloads with one tap.
+- **Blob capture (best effort, honestly reported)** — single-file `blob:` players are fetched by the page itself and streamed back in base64 chunks (512 KB each, 300 MB cap). The relay to the page goes through the shield's native-messaging port and `tabs.sendMessage`; when the engine does not support that relay, the tap fails with an explicit message instead of a silent no-op.
+- **HLS stream downloads** — m3u8 playlists resolve master→highest-bandwidth variant and download segments sequentially into a single `.ts` file with per-segment progress; encrypted playlists are refused with a clear error.
+- **Category folders** — finished files land in `Download/Zerium/<Video|Audio|Images|Docs|Archives|APKs|Other>` via MediaStore on Android 10+ (direct paths with a stated app-dir fallback on older devices).
+- **Jetpack Compose download manager** — the Downloads screen is rebuilt in Compose (Material 3): live progress with speed/ETA, filter chips (All/Active/Finished), per-task pause/resume/cancel/retry, tap to open; unit tests cover the task/category/registry layer.
+- **Appearance screen (Compose)** — theme mode (System/Light/Dark), Material You dynamic color toggle (Android 12+), and six accent colors, with an honest note about when the accent reaches classic screens.
+- **Settings** — switches for accelerated downloads and page-media detection, plus an Appearance row.
+
+### Changed
+- `ZeriumGApp` now honours the dynamic-color preference instead of applying Material You unconditionally.
+- The shield extension's blocking pipeline is untouched by the media layer: the scanner observes and reports, the engine rules are unchanged (21/21 WebView-suite parity maintained by the shared YouTube scripts).
+
+### Honest scope
+- MSE/DASH media served as many small encrypted or indexed segments is only partially capturable; DRM (Widevine) streams are never downloadable.
+- Downloads send User-Agent and Referer headers; the engine-internal Gecko cookie jar is not consulted for transfer connections (a direct download of a cookie-gated URL may need to go through the page's own flow).
+- Multi-connection speedups only materialize when the server supports HTTP ranges and the network allows parallelism.
+- Torrent downloads are not supported (no engine in-app); tracked in ROADMAP.
+- The static accent applies instantly to the Compose screens; classic View screens follow on next launch.
+
 ## [1.3.0] — 2026-09-20
 
 Add-on action popups — the toolbar gap noted in v1.2.0's honest-scope section is closed.

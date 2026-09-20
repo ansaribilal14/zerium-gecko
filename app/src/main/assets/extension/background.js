@@ -377,13 +377,75 @@ let port = null;
 try {
   port = browser.runtime.connectNative('browser');
   port.onMessage.addListener((msg) => {
-    if (!msg || msg.type !== 'config') return;
-    if (typeof msg.enabled === 'boolean') enabled = msg.enabled;
-    if (Array.isArray(msg.allowlist)) {
-      allowlist = new Set(msg.allowlist.map((h) => String(h).toLowerCase()));
+    if (!msg) return;
+    if (msg.type === 'config') {
+      if (typeof msg.enabled === 'boolean') enabled = msg.enabled;
+      if (Array.isArray(msg.allowlist)) {
+        allowlist = new Set(msg.allowlist.map((h) => String(h).toLowerCase()));
+      }
+    } else if (msg.type === 'media-grab') {
+      relayMediaGrab(msg);
     }
   });
   port.onDisconnect.addListener(() => { port = null; });
 } catch (e) {
   port = null;
+}
+
+/* ---- Media grabber: network sniffing + capture relay ---- */
+
+/* Media content types worth listing in the grabber. */
+const MEDIA_CT = /(video\/|audio\/|mpegurl|dash\+xml)/i;
+
+/* Passive observer: list media-typed responses (network-level detection for
+ * resources the DOM scan cannot see, e.g. DASH segments). */
+browser.webRequest.onHeadersReceived.addListener(
+  (details) => {
+    try {
+      if (!details.responseHeaders) return;
+      let ct = '';
+      let cl = -1;
+      for (const h of details.responseHeaders) {
+        const n = (h.name || '').toLowerCase();
+        if (n === 'content-type') ct = h.value || '';
+        else if (n === 'content-length') cl = parseInt(h.value, 10) || -1;
+      }
+      const url = details.url || '';
+      const shaped = /\.(m3u8|mpd|mp4|webm|mkv|m4s|ts|mp3|m4a|aac|ogg|opus|flac|zip|rar|7z|pdf|apk)(\?|#|$)/i.test(url);
+      if (MEDIA_CT.test(ct) || shaped) {
+        if (port) {
+          port.postMessage({ type: 'media-net', url: url, mime: ct, size: cl });
+        }
+      }
+    } catch (e) { /* never break the request pipeline */ }
+  },
+  { urls: ['<all_urls>'] },
+  ['responseHeaders']
+);
+
+/* Relays the app's blob-capture request to the page's content script.
+ * tabs.sendMessage support is probed at runtime; failure is reported back
+ * honestly instead of silently dropping. */
+async function relayMediaGrab(msg) {
+  const reply = (ok, reason) => {
+    if (port) port.postMessage({ type: 'grab-result', sid: msg.sid, ok: ok, reason: reason || '' });
+  };
+  try {
+    if (typeof browser.tabs === 'undefined' ||
+        typeof browser.tabs.sendMessage !== 'function') {
+      reply(false, 'no-tabs-api');
+      return;
+    }
+    const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+    if (!tabs || !tabs.length) {
+      reply(false, 'no-active-tab');
+      return;
+    }
+    await browser.tabs.sendMessage(tabs[0].id, {
+      type: 'media-grab', url: msg.url, sid: msg.sid, limit: msg.limit
+    });
+    reply(true, '');
+  } catch (e) {
+    reply(false, String((e && e.message) || e));
+  }
 }

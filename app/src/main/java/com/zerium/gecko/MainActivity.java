@@ -28,6 +28,17 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.zerium.gecko.dl.DownloadEngine;
+import com.zerium.gecko.dl.MediaRegistry;
+import com.zerium.gecko.dl.MediaRegistryHolder;
+import com.zerium.gecko.ui.MediaGrabberSheet;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
@@ -61,7 +72,7 @@ import java.util.List;
  * (webRequest + cosmetic CSS), strict Enhanced Tracking Protection, true
  * private sessions, and per-session JavaScript / desktop-site switches.
  */
-public class MainActivity extends AppCompatActivity implements ExtActionSupport.Host {
+public class MainActivity extends AppCompatActivity implements ExtActionSupport.Host, MediaGrabberSheet.Host {
 
     static final String HOME_URL = "about:home";
     private static final String EXTENSION_LOCATION = "resource://android/assets/extension/";
@@ -93,6 +104,7 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
     private static final int MENU_FORWARD = 22;
     private static final int MENU_RELOAD = 23;
     private static final int MENU_SHARE_QA = 24;
+    private static final int MENU_MEDIA = 25;
 
     private Prefs prefs;
     private GeckoRuntime runtime;
@@ -100,6 +112,8 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
     private WebExtension.Port shieldPort;
     private BookmarksDB bookmarks;
     private HistoryDB history;
+    private DownloadEngine engine;
+    private MediaRegistry mediaRegistry;
 
     private GSwipeLayout swipe;
     private FrameLayout webContainer;
@@ -148,6 +162,8 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         setContentView(R.layout.activity_main);
 
         prefs = new Prefs(this);
+        engine = DownloadEngine.get(this);
+        mediaRegistry = MediaRegistryHolder.get(this);
         bookmarks = new BookmarksDB(this);
         history = new HistoryDB(this);
 
@@ -572,11 +588,35 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
     private void handleShieldMessage(Object message) {
         if (!(message instanceof JSONObject)) return;
         JSONObject o = (JSONObject) message;
-        if (!"count".equals(o.optString("type"))) return;
-        long n = o.optLong("blocked", 0);
-        Tab t = tabs.currentTab();
-        if (t != null) t.blockedOnPage += n;
-        prefs.addTotalBlocked(n);
+        String type = o.optString("type");
+        if ("count".equals(type)) {
+            long n = o.optLong("blocked", 0);
+            Tab t = tabs.currentTab();
+            if (t != null) t.blockedOnPage += n;
+            prefs.addTotalBlocked(n);
+        } else if ("media-net".equals(type)) {
+            // Network-sniffed media (background webRequest observer).
+            String u = o.optString("url");
+            if (u.isEmpty()) return;
+            String tag = MediaRegistry.classifyUrl(u);
+            if (tag == null) tag = mimeToTag(o.optString("mime"));
+            if (tag == null) return;
+            mediaRegistry.addNetwork(new MediaRegistry.Item(u, tag,
+                    o.optString("mime", ""), "", o.optLong("size", -1)));
+        } else if ("grab-result".equals(type)) {
+            if (!o.optBoolean("ok", false)) {
+                toast(R.string.media_blob_unavailable);
+            }
+        }
+    }
+
+    private static String mimeToTag(String mime) {
+        if (mime == null || mime.isEmpty()) return null;
+        String m = mime.toLowerCase();
+        if (m.contains("mpegurl") || m.contains("dash+xml")) return MediaRegistry.TAG_HLS;
+        if (m.startsWith("video/")) return MediaRegistry.TAG_VIDEO;
+        if (m.startsWith("audio/")) return MediaRegistry.TAG_AUDIO;
+        return null;
     }
 
     /** Adds the current host to the blocking allowlist and pushes it live. */
@@ -754,6 +794,7 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
                 if (url != null && !url.isEmpty()) {
                     boolean changed = !url.equals(tab.url);
                     tab.url = url;
+                    if (changed) mediaRegistry.clear(tab.id);
                     if (changed && !tab.incognito && url.startsWith("http")) {
                         history.add(url, tab.title);
                     }
@@ -1461,8 +1502,8 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
 
     // ---------- Reader view ----------
 
-    /** Per-session message delegate that receives reader articles from the
-     *  shield content script (sender.session identifies the tab). */
+    /** Per-session message delegate that receives reader articles and media
+     *  grabber traffic from the shield content script (sender.session = tab). */
     private void attachReaderDelegate(Tab tab) {
         if (shield == null || tab == null) return;
         try {
@@ -1475,20 +1516,83 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
                             if (sender.session != tab.session) return null;
                             if (!(message instanceof JSONObject)) return null;
                             JSONObject o = (JSONObject) message;
-                            if (!"reader".equals(o.optString("type"))) return null;
-                            if (!o.optBoolean("readerable", false)) return null;
-                            Tab.ReaderArticle a = new Tab.ReaderArticle();
-                            a.url = o.optString("url");
-                            a.title = o.optString("title");
-                            a.byline = o.optString("byline");
-                            a.siteName = o.optString("siteName");
-                            a.content = o.optString("content");
-                            a.length = o.optInt("length", 0);
-                            if (a.content.length() > 0) tab.readerArticle = a;
+                            String type = o.optString("type");
+                            if ("reader".equals(type)) {
+                                if (!o.optBoolean("readerable", false)) return null;
+                                Tab.ReaderArticle a = new Tab.ReaderArticle();
+                                a.url = o.optString("url");
+                                a.title = o.optString("title");
+                                a.byline = o.optString("byline");
+                                a.siteName = o.optString("siteName");
+                                a.content = o.optString("content");
+                                a.length = o.optInt("length", 0);
+                                if (a.content.length() > 0) tab.readerArticle = a;
+                                return null;
+                            }
+                            handleTabMediaMessage(tab, o, type);
                             return null;
                         }
                     }, NATIVE_APP);
         } catch (Exception ignored) {}
+    }
+
+    /** Media grabber traffic from the per-tab content script. */
+    private void handleTabMediaMessage(Tab tab, JSONObject o, String type) {
+        switch (type) {
+            case "media": {
+                JSONArray items = o.optJSONArray("items");
+                if (items == null) return;
+                for (int i = 0; i < items.length() && i < 50; i++) {
+                    JSONObject it = items.optJSONObject(i);
+                    if (it == null) continue;
+                    String u = it.optString("url", "");
+                    if (u.isEmpty()) continue;
+                    mediaRegistry.add(tab.id, new MediaRegistry.Item(
+                            u, it.optString("tag", "video"), it.optString("mime", ""),
+                            it.optString("label", ""), it.optLong("size", -1)));
+                }
+                break;
+            }
+            case "blob-begin": {
+                String name = (tab.title == null || tab.title.isEmpty()
+                        ? Utils.hostOf(tab.url) : tab.title);
+                if (name == null || name.isEmpty()) name = "capture";
+                name = name.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
+                String mime = o.optString("mime", "");
+                String ext = mime.contains("video/") ? ".mp4"
+                        : mime.contains("audio/") ? ".m4a" : ".bin";
+                engine.beginBlob(o.optString("sid", ""), o.optLong("size", -1),
+                        mime, name + ext);
+                break;
+            }
+            case "blob-chunk": {
+                String sid = o.optString("sid", "");
+                String b64 = o.optString("b64", "");
+                if (sid.isEmpty() || b64.isEmpty()) return;
+                try {
+                    File f = engine.blobFile(sid);
+                    if (f == null) return;
+                    byte[] data = Base64.getDecoder().decode(b64);
+                    try (FileOutputStream os = new FileOutputStream(f, true)) {
+                        os.write(data);
+                    }
+                    engine.blobProgress(sid, f.length());
+                } catch (Exception e) {
+                    engine.endBlob(sid, "write-failed");
+                }
+                break;
+            }
+            case "blob-end": {
+                String err = o.optString("error", "");
+                engine.endBlob(o.optString("sid", ""), err);
+                if ("too-large".equals(err)) {
+                    runOnUiThread(() -> toast(R.string.dl_blob_too_large));
+                }
+                break;
+            }
+            default:
+                break;
+        }
     }
 
     private void toggleReader() {
@@ -2014,6 +2118,9 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         entries.add(MenuSheet.item(MENU_BOOKMARKS, R.string.menu_bookmarks, R.drawable.ic_bookmark));
         entries.add(MenuSheet.item(MENU_HISTORY, R.string.menu_history, R.drawable.ic_history));
         entries.add(MenuSheet.item(MENU_DOWNLOADS, R.string.menu_downloads, R.drawable.ic_download));
+        entries.add(MenuSheet.item(MENU_MEDIA, R.string.menu_media, R.drawable.ic_video,
+                onPage && t != null
+                        && (mediaRegistry.count(t.id) > 0 || !mediaRegistry.networkItems().isEmpty())));
         entries.add(MenuSheet.item(MENU_FIND, R.string.menu_find, R.drawable.ic_search, onPage));
         entries.add(MenuSheet.divider());
         // Page tools
@@ -2068,7 +2175,12 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
                 startActivity(new Intent(this, HistoryActivity.class));
                 break;
             case MENU_DOWNLOADS:
-                startActivity(new Intent(this, DownloadsActivity.class));
+                startActivity(new Intent(this, com.zerium.gecko.ui.DownloadsActivity.class));
+                break;
+            case MENU_MEDIA:
+                if (t != null) {
+                    MediaGrabberSheet.show(getSupportFragmentManager(), t.id);
+                }
                 break;
             case MENU_FIND: showFindBar(); break;
             case MENU_READER: toggleReader(); break;
@@ -2229,19 +2341,71 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
     private static final int A_COPY = 3;
     private static final int A_SHARE = 4;
 
-    /** Asks the shield extension to download a URL (browser.downloads API). */
+    /** Hands the URL to the local download engine (turbo segments + HLS). */
     private void downloadViaShield(String url) {
         try {
-            if (shieldPort != null) {
-                JSONObject msg = new JSONObject();
-                msg.put("type", "download");
-                msg.put("url", url);
-                shieldPort.postMessage(msg);
-                toast(R.string.download_started);
-                return;
-            }
-        } catch (Exception ignored) {}
-        toast(R.string.download_failed_generic);
+            ensureNotifPermission();
+            Tab t = tabs.currentTab();
+            String tag = MediaRegistry.classifyUrl(url);
+            engine.enqueue(url, Utils.fileNameFromUrl(url), "",
+                    null, url, t != null ? t.url : "", t != null ? t.title : "",
+                    MediaRegistry.TAG_HLS.equals(tag), prefs.turboDownloads());
+            toast(R.string.download_started);
+        } catch (Exception e) {
+            toast(R.string.download_failed_generic);
+        }
+    }
+
+    /** Entry point for media-grabber rows (videos, streams, files, blobs). */
+    @Override
+    public void onMediaDownloadRequested(MediaRegistry.Item item) {
+        if (item == null || item.url == null) return;
+        if (MediaRegistry.TAG_BLOB.equals(item.tag)) {
+            captureBlob(item.url);
+            return;
+        }
+        startTurboDownload(item.url, MediaRegistry.TAG_HLS.equals(item.tag), item.mime);
+    }
+
+    private void startTurboDownload(String url, boolean hls, String mime) {
+        try {
+            ensureNotifPermission();
+            Tab t = tabs.currentTab();
+            engine.enqueue(url, Utils.fileNameFromUrl(url), mime,
+                    null, url, t != null ? t.url : "", t != null ? t.title : "",
+                    hls, prefs.turboDownloads());
+            toast(R.string.download_started);
+        } catch (Exception e) {
+            toast(R.string.download_failed_generic);
+        }
+    }
+
+    /** Asks the shield background to relay a capture request to the page. */
+    private void captureBlob(String blobUrl) {
+        Tab t = tabs.currentTab();
+        if (t == null || shieldPort == null) {
+            toast(R.string.media_blob_unavailable);
+            return;
+        }
+        try {
+            String sid = Long.toString(System.currentTimeMillis(), 36);
+            JSONObject msg = new JSONObject();
+            msg.put("type", "media-grab");
+            msg.put("url", blobUrl.replace("'", ""));
+            msg.put("sid", sid);
+            msg.put("limit", 300);
+            shieldPort.postMessage(msg);
+            toast(R.string.download_started);
+        } catch (Exception e) {
+            toast(R.string.media_blob_unavailable);
+        }
+    }
+
+    private void ensureNotifPermission() {
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            permLauncher.launch(new String[]{android.Manifest.permission.POST_NOTIFICATIONS});
+        }
     }
 
     /**
@@ -2295,6 +2459,9 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
                 done.put(MediaStore.Downloads.IS_PENDING, 0);
                 getContentResolver().update(item, done, null, null);
             }
+            String finalUri = item != null ? item.toString()
+                    : (legacy != null ? legacy.getAbsolutePath() : "");
+            engine.recordCompleted(response.uri, name, mime, finalUri, written);
             toast(getString(R.string.download_saved,
                     legacy != null ? legacy.getAbsolutePath() : name));
         } catch (Exception e) {

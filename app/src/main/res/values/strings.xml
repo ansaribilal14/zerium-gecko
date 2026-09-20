@@ -233,4 +233,61 @@
     <string name="addons_err_blocklisted">this add-on is blocklisted</string>
     <string name="addons_err_generic">the add-on was rejected by the engine</string>
     <string name="addons_shield_desc">Built-in engine-level ad and tracker blocking (hosts lists, EasyList subset, YouTube suppression, cosmetic CSS)</string>
+
+    <!-- Download manager -->
+    <string name="dl_channel_active">Downloads</string>
+    <string name="dl_channel_done">Download results</string>
+    <string name="dl_service_running">Downloading…</string>
+    <string name="dl_pause">Pause</string>
+    <string name="dl_resume">Resume</string>
+    <string name="dl_cancel">Cancel</string>
+    <string name="dl_retry">Retry</string>
+    <string name="dl_open">Open</string>
+    <string name="dl_paused">Paused</string>
+    <string name="dl_queued">Queued</string>
+    <string name="dl_complete">Download complete</string>
+    <string name="dl_failed">Download failed</string>
+    <string name="dl_filter_all">All</string>
+    <string name="dl_filter_active">Active</string>
+    <string name="dl_filter_done">Finished</string>
+    <string name="dl_empty">No downloads yet</string>
+    <string name="dl_status_completed">Completed</string>
+    <string name="dl_status_failed">Failed</string>
+    <string name="dl_status_paused">Paused</string>
+    <string name="dl_status_queued">Queued</string>
+    <string name="dl_add">Download</string>
+    <string name="dl_err_encrypted">Encrypted streams (AES/DRM) are not supported</string>
+    <string name="dl_err_range">Server does not support resumable ranges</string>
+    <string name="dl_err_forbidden">Server refused the download (403)</string>
+    <string name="dl_err_notfound">File not found (404)</string>
+    <string name="dl_err_space">Not enough storage space</string>
+    <string name="dl_err_http">Server error: HTTP %1$s</string>
+    <string name="dl_err_network">Network error — check your connection</string>
+    <string name="notif_perm_needed">Allow notifications to follow download progress</string>
+
+    <!-- Media grabber -->
+    <string name="media_title">Media on this page</string>
+    <string name="media_empty">Nothing detected yet — media appears as the page loads</string>
+    <string name="media_scope_note">Direct files, playlists and blob-backed players can be captured. Encrypted and DRM-protected streams cannot be downloaded.</string>
+    <string name="menu_media">Media on this page</string>
+
+    <!-- Appearance -->
+    <string name="appearance_title">Appearance</string>
+    <string name="appearance_theme">Theme</string>
+    <string name="appearance_system">System</string>
+    <string name="appearance_light">Light</string>
+    <string name="appearance_dark">Dark</string>
+    <string name="appearance_dynamic">Dynamic color (Material You)</string>
+    <string name="appearance_dynamic_sub">Wallpaper-based palette on Android 12+</string>
+    <string name="appearance_accent">Accent color</string>
+    <string name="appearance_note">The accent applies to the new download and media screens immediately; classic screens follow it after a restart.</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_turbo">Accelerated downloads</string>
+    <string name="settings_turbo_sub">Split files across multiple connections where servers allow it</string>
+    <string name="settings_media_grabber">Detect page media</string>
+    <string name="settings_media_grabber_sub">List videos and audio found on pages for one-tap download</string>
+
+    <string name="media_blob_unavailable">This player cannot be captured on this page — try the direct stream link instead</string>
+    <string name="dl_hls_progress">Stream segment %1$d of %2$d</string>
+    <string name="dl_blob_too_large">File exceeds the 300 MB capture limit</string>
 </resources>

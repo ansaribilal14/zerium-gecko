@@ -19,3 +19,10 @@ The add-on platform landed in v1.2.0: a full WebExtension manager (curated AMO c
 
 - Background media playback controls.
 - Sync evaluation (same honest framework as `docs/SYNC_EVALUATION.md` in the main repo).
+
+## Download-manager track (opened in v1.4.0)
+
+- BitTorrent/magnet support: needs an in-app engine decision (library size vs. APK weight next to GeckoView); evaluate libtorrent4j and a native-service design before committing.
+- Per-site download rules and download-location picker.
+- DASH (mpd) segment assembly beyond the current playlist handling; encrypted HLS (AES-128) via a key-fetch path if legally unencumbered use cases demand it.
+- Extension-mediated blob capture once `tabs.sendMessage` coverage is confirmed across GeckoView trains (currently probed at runtime with an honest failure path).

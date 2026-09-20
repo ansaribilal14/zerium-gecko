@@ -12,7 +12,10 @@ public class ZeriumGApp extends Application {
     public void onCreate() {
         super.onCreate();
         instance = this;
-        DynamicColors.applyToActivitiesIfAvailable(this);
+        // Material You dynamic color honours the user's Appearance setting.
+        if (new Prefs(this).dynamicColor()) {
+            DynamicColors.applyToActivitiesIfAvailable(this);
+        }
     }
 
     public static ZeriumGApp get() {
