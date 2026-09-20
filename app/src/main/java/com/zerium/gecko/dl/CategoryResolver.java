@@ -1,7 +1,5 @@
 package com.zerium.gecko.dl;
 
-import android.text.TextUtils;
-
 import java.util.Locale;
 
 /**
@@ -49,7 +47,7 @@ public final class CategoryResolver {
     }
 
     private static String extOf(String s) {
-        if (TextUtils.isEmpty(s)) return "";
+        if (s == null || s.isEmpty()) return "";
         String p = s.split("[?#]")[0];
         int i = p.lastIndexOf('.');
         if (i < 0 || i == p.length() - 1) return "";
@@ -69,7 +67,7 @@ public final class CategoryResolver {
     }
 
     private static int fromMime(String mime) {
-        if (TextUtils.isEmpty(mime)) return -1;
+        if (mime == null || mime.isEmpty()) return -1;
         String m = mime.toLowerCase(Locale.US);
         if (m.startsWith("video/")) return VIDEO;
         if (m.startsWith("audio/")) return AUDIO;

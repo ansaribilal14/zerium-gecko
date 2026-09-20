@@ -1,7 +1,5 @@
 package com.zerium.gecko.dl;
 
-import android.text.TextUtils;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -45,7 +43,7 @@ public final class MediaRegistry {
     private final LinkedHashMap<String, Item> network = new LinkedHashMap<>();
 
     public synchronized void add(long tabId, Item item) {
-        if (item == null || TextUtils.isEmpty(item.url)) return;
+        if (item == null || item.url == null || item.url.isEmpty()) return;
         LinkedHashMap<String, Item> m = perTab.get(tabId);
         if (m == null) {
             m = new LinkedHashMap<>();
@@ -59,7 +57,7 @@ public final class MediaRegistry {
     }
 
     public synchronized void addNetwork(Item item) {
-        if (item == null || TextUtils.isEmpty(item.url)) return;
+        if (item == null || item.url == null || item.url.isEmpty()) return;
         if (!network.containsKey(item.url)) network.put(item.url, item);
         while (network.size() > MAX_NET) {
             String first = network.keySet().iterator().next();
