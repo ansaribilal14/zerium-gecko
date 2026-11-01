@@ -1,5 +1,14 @@
 # Roadmap
 
+## v1.7 (shipped)
+
+- Two-menu split mirroring Zerium Browser 1.13.0: the bottom task bar's menu is a compact quick-actions sheet (tabs, spaces, destinations, common toggles); the top menu keeps the full list (quick-nav row, page tools, add-ons, app entries).
+
+## v1.6 (shipped)
+
+- Tab groups inside Spaces: Chrome-style drag-and-drop grouping within the active space as pure metadata (`Tab.groupId`) — moving tabs never recreates the GeckoSession, its history or the space's engine profile. Colored collapsible group headers, persistence per space and across the per-space tab archive. Spec: `docs/issues/tab-groups-inside-spaces.md`.
+- Android browser integration: exported browser activity with `ACTION_VIEW` + `category.BROWSABLE` http/https intent filters; Settings → Links with a `RoleManager.ROLE_BROWSER` default-browser request (Android 10+) and "External links open in" (default space / current space / ask every time); links bound for another isolated space are parked across the space-switch restart — isolation is never silently crossed. Spec: `docs/issues/android-browser-integration.md`.
+
 ## v1.2 (shipped)
 
 The add-on platform landed in v1.2.0: a full WebExtension manager (curated AMO catalog + local signed `.xpi`, enable/disable, private-mode grants, uninstall, install-time permission prompts), the Brave-style menu and start page, delete-browsing-data, tab search and HTTPS-only mode. See `CHANGELOG.md`.

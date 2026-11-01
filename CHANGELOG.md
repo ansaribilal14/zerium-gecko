@@ -7,6 +7,14 @@ All notable changes to Zerium G are documented in this file (Keep a Changelog fo
 ### Planned
 - Torrent engine evaluation (APK-size tradeoff), DASH assembly, encrypted HLS — see the download track in ROADMAP.
 - Spaces follow-ups: per-space colored identities, per-space add-on presets documented at creation time.
+- Anti-adblock bypass port of Zerium Browser's engine (extension content-script + background webRequest), including the v1.13.0 hardening: bounded-descent wall discovery, ancestor walking from un-randomizable widget artifacts, structural-evidence floor, tamper-lowered removal bar.
+
+## [1.7.0] — 2026-11-01
+
+Menu split to match Zerium Browser 1.13.0.
+
+### Changed
+- **The bottom task bar and the top menu no longer open the same sheet.** The bottom ⋮ opens a compact quick-actions sheet (new tab / incognito / spaces / downloads in the circular row, then bookmarks, history, media, find, desktop site and reader). The top menu keeps the complete list with the quick-nav row (back / forward / refresh / share) and all page tools (JavaScript toggle, translate, print, save as PDF, per-site blocking), add-ons and app entries. Both routes share the same handlers.
 
 ## [1.6.0] — 2026-11-01
 
