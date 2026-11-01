@@ -291,4 +291,29 @@
     <string name="media_blob_unavailable">This player cannot be captured on this page — try the direct stream link instead</string>
     <string name="dl_hls_progress">Stream segment %1$d of %2$d</string>
     <string name="dl_blob_too_large">File exceeds the 300 MB capture limit</string>
+
+    <!-- Zerium Spaces -->
+    <string name="menu_spaces">Spaces</string>
+    <string name="spaces_title">Spaces</string>
+    <string name="spaces_new">New space</string>
+    <string name="spaces_name_hint">Space name (e.g. Personal, Work)</string>
+    <string name="spaces_name_required">Give the space a name</string>
+    <string name="spaces_isolated">Isolated space</string>
+    <string name="spaces_isolated_unsupported">Isolation is unavailable on this engine — spaces still organize tabs.</string>
+    <string name="spaces_badge_isolated">Isolated</string>
+    <string name="spaces_badge_default">Default</string>
+    <string name="spaces_tab_count">%1$d tab(s)</string>
+    <string name="spaces_rename">Rename</string>
+    <string name="spaces_delete">Delete</string>
+    <string name="spaces_delete_title">Delete %1$s?</string>
+    <string name="spaces_delete_confirm">Delete \"%1$s\"? Its %2$d tab(s) will close and the space\'s saved logins and site data will be erased. Other spaces keep their sessions.</string>
+    <string name="spaces_deleted">Space deleted</string>
+    <string name="spaces_default_locked">The default space can\'t be deleted</string>
+    <string name="spaces_created">Space created</string>
+    <string name="spaces_switch_restarting">Switching to %1$s — restarting the engine…</string>
+    <string name="spaces_move_title">Move to space</string>
+    <string name="spaces_move_note">Tabs moving into or out of an isolated space open with that space\'s cookies and sessions on the next switch.</string>
+    <string name="spaces_no_incognito">Private tabs don\'t belong to spaces</string>
+    <string name="spaces_delete_scope">Clears the running engine profile — the current space\'s data. Other isolated spaces keep their own profiles.</string>
+    <string name="spaces_footer_gecko">Isolated spaces run their own engine profile: separate logins, site data and add-ons. Switching spaces restarts the browser engine.</string>
 </resources>

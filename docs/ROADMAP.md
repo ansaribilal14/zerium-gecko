@@ -8,6 +8,10 @@ The add-on platform landed in v1.2.0: a full WebExtension manager (curated AMO c
 
 - Add-on action popups are surfaced in the app: a puzzle-piece toolbar button appears when the active tab has browser/page actions, lists them with badges, and renders the add-on's popup UI in an anchored window (the app owns popup sessions per the GeckoView contract).
 
+## v1.5 (shipped)
+
+- Zerium Spaces: tab groups with per-space logins. Isolated spaces own a real engine profile directory selected with the standard `-profile` launch argument (cookies, site data, cache, installed add-ons); switching spaces restarts the process into the target profile with tabs persisted and restored from a per-space archive. Space chips + manager sheet (switch/rename/delete with directory wipe, including the post-restart wipe for the space you are in), move-tab-between-spaces across isolation boundaries, and space-scoped "Delete browsing data" with a plain scope note.
+
 ## v1.4 - blocking depth
 
 - Filter-list refresh channel for the shield (validated, atomic, same discipline as the WebView edition updater) — in-app rule updates between releases.

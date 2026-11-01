@@ -307,6 +307,24 @@
                     app:tint="?attr/colorOnSurfaceVariant" />
             </LinearLayout>
 
+            <HorizontalScrollView
+                android:id="@+id/spaceChipsBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:clipToPadding="false"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/spaceChips"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="6dp" />
+            </HorizontalScrollView>
+
             <EditText
                 android:id="@+id/searchTabs"
                 android:layout_width="match_parent"

@@ -35,6 +35,7 @@ Both apps keep the same honest-scope discipline: everything documented here is i
 - **Site permissions, with memory** — location, camera, microphone, notifications, DRM and storage prompts with per-site remember; tracking and autoplay are never granted. Platform password autofill (bring your own password manager).
 - **Per-tab JavaScript and Desktop-site toggles** — engine-native session settings, applied live, with reload.
 - **Tabs with live previews and full session restore** — compositor-captured screenshots (never for private tabs), grid switcher, back/forward history preserved across app restarts.
+- **Spaces** — tab groups with per-space logins: isolated spaces each own a real engine profile directory (cookies, site data, cache, installed add-ons), so the same site can stay signed in with a different account per space. Switching spaces switches identity (an honest process restart swaps the engine profile); tabs persist with full session state and the per-space archive keeps memory flat; rename, delete-with-data-wipe and move-tab-between-spaces included.
 - **Pull-to-refresh that respects the page** — arms only at the actual top of a page (engine scroll position); edge-swipe tab switching.
 - **Find in page** — the engine Finder API with a real x/y counter.
 - **Turbo download engine** — a full download manager built into the browser: multi-connection range downloads (up to 8 connections per file where the server supports HTTP ranges, automatic single-connection fallback), pause/resume with persisted partial progress, a bounded download queue, automatic retry with backoff, and background downloading through a foreground service with per-task progress notifications (speed, ETA, pause/resume/cancel actions). Content-Disposition downloads are recorded in the same manager; files are organized into category folders under `Download/Zerium/` (Video, Audio, Images, Docs, Archives, APKs, Other).
@@ -49,7 +50,7 @@ Both apps keep the same honest-scope discipline: everything documented here is i
 - **Brave-style menu and start page** — a sectioned bottom-sheet menu with a circular quick-action row, a Privacy Stats card on the start page (Trackers & Ads Blocked / Est. Data Saved / Est. Time Saved — Brave's conservative ≈50 KB + ≈50 ms per-block formula, computed on-device), favicon tiles with monogram fallback, DuckDuckGo suggestions on the start-page search box only, "Search your tabs" filtering in the tab switcher, and a Delete-browsing-data dialog backed by the engine `StorageController`.
 - **HTTPS-only mode** — off / private tabs only / all tabs, applied live through the engine.
 
-## Honest limitations (v1.4.0)
+## Honest limitations (v1.5.0)
 
 The v1.0.0 list (denied permission prompts, no printing/PDF, no reader view, no autofill wiring, hosts-only blocking, no YouTube layer) and the v1.1.0 list (same, after the resolution release) are **fully resolved**. What remains honest to state:
 
@@ -57,6 +58,7 @@ The v1.0.0 list (denied permission prompts, no printing/PDF, no reader view, no 
 - SSAP server-stitched YouTube mid-rolls are part of the media stream itself; no client-side blocker can remove them. The confirmed-ad watchdog fast-forwards through them (same honest boundary as the WebView edition).
 - **Add-ons must be Mozilla-signed** — the Gecko engine enforces signature validation and it cannot be turned off by an embedder: the catalog therefore points at AMO-hosted packages, locally picked files must be signed `.xpi` Firefox add-ons, and raw Chrome `.crx` or unsigned developer builds are rejected with an explicit message.
 - **Add-on action popups** render in an anchored toolbar window since v1.3.0; one embedding boundary remains: links inside a popup that force a new-tab open are dropped (the popup session has no tab delegate).
+- **Spaces restart the engine on switch** — GeckoView allows one runtime (one engine profile) per process, so switching spaces is a deliberate process restart with tabs persisted and restored. Installed add-ons are per-space: a new isolated space starts with the built-in Shield only.
 - Reader view parses the DOM snapshot at load: paywalled or JS-gated content yields what is actually in the DOM.
 - Reader-mode renders live in the app cache as a single HTML file and are deleted on exit; a crash between open and exit could leave one behind (app-private storage).
 - datetime-local / month / week form prompts are dismissed rather than approximated with a different control.

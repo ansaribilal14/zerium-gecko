@@ -40,6 +40,8 @@ public class Tab {
     public boolean readerActive;
     /** The URL the reader page was opened from (null when not in reader). */
     public String readerSourceUrl;
+    /** Zerium Space this tab belongs to (never null; see {@link Spaces}). */
+    public String spaceId = Spaces.DEFAULT_ID;
 
     public Tab(long id, GeckoSession session, GeckoView view, boolean incognito) {
         this.id = id;

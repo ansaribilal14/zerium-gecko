@@ -47,6 +47,7 @@
 
     <!-- Legacy roles (kept for existing references) -->
     <color name="accent">#4355B9</color>
+    <color name="on_accent">#FFFFFF</color>
     <color name="border">#E2E2EA</color>
     <color name="ic_launcher_bg">#0B0F1A</color>
     <color name="ic_launcher_accent">#7C9CFF</color>

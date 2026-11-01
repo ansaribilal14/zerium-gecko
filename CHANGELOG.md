@@ -2,6 +2,35 @@
 
 All notable changes to Zerium G are documented in this file (Keep a Changelog format). Stable builds are published as immutable `vX.Y.Z` releases; the rolling `latest` tag tracks the newest successful build of `main`.
 
+## [Unreleased]
+
+### Planned
+- Torrent engine evaluation (APK-size tradeoff), DASH assembly, encrypted HLS — see the download track in ROADMAP.
+- Spaces follow-ups: per-space colored identities, per-space add-on presets documented at creation time.
+
+## [1.5.0] — 2026-11-01
+
+The Zerium Spaces release: tab groups with per-space logins — one isolated space per identity, with a real engine profile directory behind each.
+
+### Added
+- **Zerium Spaces** — a Spaces entry in the menu and a chip bar in the tab switcher list every space with its live tab count (in memory for the active space, archived for the others). The switcher shows the active space's tabs plus private tabs, which belong to no space. New tabs open into the active space automatically.
+- **Isolated spaces** — creating a space can turn on Isolation: the space then owns an engine profile directory (launched with the standard `-profile` argument), giving it its own cookies, site data, cache and installed add-ons. Log in as user A in one space and user B in another; sessions survive closing tabs, switching spaces and app restarts.
+- **Space switching** — GeckoView allows one engine runtime per process, so switching spaces restarts the browser process (tabs persist with full session state, the engine relaunches with the target space's profile, and its tabs restore with cookies intact). A toast says what is happening; the same flow serves creating your first isolated space and switching back.
+- **Space management** — the manager sheet supports rename and delete with an explicit confirmation: tabs close, the archived tabs and the space's whole profile directory are erased, other spaces keep their sessions. Deleting the space you are in switches to the default space first (its directory is wiped after the restart). The default space can be renamed but not deleted or isolated.
+- **Move tabs between spaces** — long-press a tab card to move it. Cross-isolation moves archive the tab with its session state (it reopens under the target space's profile on the next switch); moves between non-isolated spaces re-tag instantly.
+- **Per-space tab archive** — only the active space's tabs live in memory; every other space's tabs (URL + full session state) wait in an archive and restore when their space becomes active, so memory stays flat no matter how many spaces you keep.
+
+### Changed
+- "Close all" in the tab switcher now closes the current space's tabs (the scope the switcher shows).
+- "Delete browsing data" states its scope plainly when isolated spaces exist: it clears the running engine profile — the current space's data.
+
+### Honest scope
+- Switching isolated spaces restarts the engine — by design, not a bug: one engine profile runs per process. Tab state, logins and site data persist across the restart; a brief toast covers the gap.
+- Installed add-ons are per-space (they live in the engine profile), so a new isolated space starts with the built-in Shield and without third-party add-ons until you install them there. The Shield works in every space.
+- Private tabs stay outside spaces (they never persist), so they are reachable from every space's switcher.
+- Isolation is browsing-session separation between your own spaces, not device-level anonymity.
+- The shield extension's blocking pipeline is untouched (Shield suite green; the WebView-parity YouTube scripts unchanged).
+
 ## [1.4.0] — 2026-09-20
 
 The Turbo Downloads release: a complete download manager with an in-page media grabber, plus Jetpack Compose (Material 3) screens and deeper appearance customization.

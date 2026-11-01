@@ -11,6 +11,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
@@ -105,6 +106,7 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
     private static final int MENU_RELOAD = 23;
     private static final int MENU_SHARE_QA = 24;
     private static final int MENU_MEDIA = 25;
+    private static final int MENU_SPACES = 26;
 
     private Prefs prefs;
     private GeckoRuntime runtime;
@@ -114,6 +116,9 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
     private HistoryDB history;
     private DownloadEngine engine;
     private MediaRegistry mediaRegistry;
+    private Spaces spaces;
+    private SpaceTabArchive tabArchive;
+    private LinearLayout spaceChips;
 
     private GSwipeLayout swipe;
     private FrameLayout webContainer;
@@ -162,6 +167,17 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         setContentView(R.layout.activity_main);
 
         prefs = new Prefs(this);
+        spaces = Spaces.load(prefs.spacesJson());
+        tabArchive = SpaceTabArchive.load(prefs.spacesTabsJson());
+        // Wipe profile directories of spaces deleted while they were active
+        // (deletion must wait for the restart that switched away from them).
+        String pendingDirs = prefs.pendingSpaceDirs();
+        if (pendingDirs != null && !pendingDirs.isEmpty()) {
+            for (String id : pendingDirs.split(",")) {
+                if (!id.isEmpty()) SpaceRuntime.deleteDir(this, id);
+            }
+            prefs.pendingSpaceDirs("");
+        }
         engine = DownloadEngine.get(this);
         mediaRegistry = MediaRegistryHolder.get(this);
         bookmarks = new BookmarksDB(this);
@@ -184,6 +200,7 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         findCount = findViewById(R.id.findCount);
         tabSwitcher = findViewById(R.id.tabSwitcher);
         tabsGrid = findViewById(R.id.tabsGrid);
+        spaceChips = findViewById(R.id.spaceChips);
         tabSearch = findViewById(R.id.searchTabs);
         noMatchingTabs = findViewById(R.id.noMatchingTabs);
 
@@ -305,7 +322,13 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
             public void onClose(Tab tab) {
                 closeTab(tab);
             }
+
+            @Override
+            public void onLongPress(Tab tab) {
+                showMoveTabDialog(tab);
+            }
         });
+        tabsAdapter.setActiveSpaceId(spaces.activeId());
         tabsGrid.setAdapter(tabsAdapter);
         tabSearch.addTextChangedListener(new android.text.TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
@@ -335,7 +358,9 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
 
     // ---------- Runtime + built-in blocking extension ----------
 
-    private void createRuntime() {
+    /** Builds runtime settings; isolated active spaces launch the engine
+     *  with their own profile directory via the -profile argument. */
+    private GeckoRuntimeSettings buildRuntimeSettings() {
         @GeckoRuntimeSettings.ColorScheme int scheme = colorSchemeConstant();
         org.mozilla.geckoview.ContentBlocking.Settings.Builder cb =
                 new org.mozilla.geckoview.ContentBlocking.Settings.Builder()
@@ -347,14 +372,19 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
                 : org.mozilla.geckoview.ContentBlocking.CookieBannerMode.COOKIE_BANNER_MODE_DISABLED;
         cb.cookieBannerHandlingMode(cbMode);
         cb.cookieBannerHandlingModePrivateBrowsing(cbMode);
-        runtime = GeckoRuntime.create(this, new GeckoRuntimeSettings.Builder()
+        GeckoRuntimeSettings.Builder rb = new GeckoRuntimeSettings.Builder()
                 .contentBlocking(cb.build())
                 .preferredColorScheme(scheme)
                 .fontSizeFactor(prefs.fontSizeFactor())
                 .allowInsecureConnections(httpsOnlyConstant())
                 .aboutConfigEnabled(false)
-                .debugLogging(false)
-                .build());
+                .debugLogging(false);
+        SpaceRuntime.prepareLaunch(this, spaces, rb);
+        return rb.build();
+    }
+
+    private void createRuntime() {
+        runtime = GeckoRuntime.create(this, buildRuntimeSettings());
         runtimeForAddons = runtime;
         applyLocales();
         installExtensionDelegates();
@@ -674,6 +704,7 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         if (extActions != null) extActions.attachSession(session);
 
         Tab tab = tabs.add(new Tab(tabs.count() + System.identityHashCode(session), session, view, incognito));
+        tab.spaceId = incognito ? Spaces.DEFAULT_ID : spaces.activeId();
         setupSession(tab);
         attachReaderDelegate(tab);
         loadInTab(tab, (url == null || url.isEmpty()) ? HOME_URL : url);
@@ -716,15 +747,34 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         tabsAdapter.notifyDataSetChanged();
     }
 
+    /** Closes the active space's tabs (the switcher's current view scope). */
     private void closeAllTabs() {
-        while (tabs.count() > 0) {
-            Tab t = tabs.tabs().get(0);
-            webContainer.removeView(t.view);
-            tabs.remove(t);
-            t.destroy();
-        }
+        closeActiveSpaceTabsInMemory();
         hideTabSwitcher();
-        openTab(null, false);
+        if (tabs.count() == 0) openTab(null, false);
+        else {
+            showCurrentWebView();
+            updateChrome(tabs.currentTab());
+        }
+        tabsAdapter.notifyDataSetChanged();
+        buildSpaceChips();
+    }
+
+    /** Destroys the in-memory tabs of the active space. */
+    private void closeActiveSpaceTabsInMemory() {
+        String scope = spaces.activeId();
+        int i = 0;
+        while (i < tabs.tabs().size()) {
+            Tab t = tabs.tabs().get(i);
+            if (!t.incognito && scope.equals(t.spaceId)) {
+                webContainer.removeView(t.view);
+                tabs.remove(t);
+                t.destroy();
+                if (extActions != null) extActions.detachSession(t.session);
+            } else {
+                i++;
+            }
+        }
     }
 
     private void cycleTab(int dir) {
@@ -2111,6 +2161,7 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         // Browsing
         entries.add(MenuSheet.item(MENU_NEW_TAB, R.string.menu_new_tab, R.drawable.ic_plus));
         entries.add(MenuSheet.item(MENU_NEW_INCOGNITO, R.string.menu_new_incognito, R.drawable.ic_incognito));
+        entries.add(MenuSheet.item(MENU_SPACES, R.string.menu_spaces, R.drawable.ic_spaces));
         entries.add(MenuSheet.divider());
         entries.add(MenuSheet.item(MENU_BOOKMARK_ADD, isCurrentBookmarked()
                         ? R.string.menu_remove_bookmark : R.string.menu_add_bookmark,
@@ -2155,6 +2206,7 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         switch (id) {
             case MENU_NEW_TAB: openTab(null, false); break;
             case MENU_NEW_INCOGNITO: openTab(null, true); break;
+            case MENU_SPACES: showSpacesSheet(); break;
             case MENU_BOOKMARK_ADD:
                 if (t == null || isStartPage(t)) return;
                 String pageNow = pageUrl(t);
@@ -2243,12 +2295,23 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
     }
 
     /** Brave-style "Delete browsing data": history, cookies/site data and
-     *  engine caches, via the engine StorageController. */
+     *  engine caches, via the engine StorageController. Scope: the running
+     *  engine profile — the active space's data. Other isolated spaces keep
+     *  their own profile directories untouched. */
     private void deleteBrowsingData() {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         int pad = (int) (20 * getResources().getDisplayMetrics().density);
         box.setPadding(pad, pad / 2, pad, 0);
+        boolean anyIsolated = false;
+        for (Spaces.Space sp : spaces.all()) anyIsolated |= sp.isolated;
+        if (anyIsolated) {
+            TextView scope = new TextView(this);
+            scope.setText(R.string.spaces_delete_scope);
+            scope.setTextSize(12.5f);
+            scope.setTextColor(ContextCompat.getColor(this, R.color.on_surface_variant));
+            box.addView(scope);
+        }
         android.widget.CheckBox historyBox = new android.widget.CheckBox(this);
         historyBox.setText(R.string.delete_data_history);
         historyBox.setChecked(true);
@@ -2502,6 +2565,7 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         if (current != null && !current.incognito && !isStartPage(current)) capturePreview(current);
         tabSearch.setText("");
         noMatchingTabs.setVisibility(View.GONE);
+        buildSpaceChips();
         tabsAdapter.notifyDataSetChanged();
         tabSwitcher.setVisibility(View.VISIBLE);
         hideKeyboard();
@@ -2533,63 +2597,86 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
 
     // ---------- Session persistence ----------
 
-    /** Saves URL + full session state (back/forward history) per tab. */
+    /**
+     * Restores the active space's tabs from the per-space archive. A legacy
+     * pre-Spaces session (prefs.savedTabs) migrates into the current
+     * space's archive once.
+     */
     private void restoreSession() {
-        String saved = prefs.savedTabs();
         int index = prefs.savedTabIndex();
         int opened = 0;
-        int target = 0;
-        if (saved != null && !saved.isEmpty()) {
-            try {
-                org.json.JSONArray arr = new org.json.JSONArray(saved);
-                for (int i = 0; i < arr.length() && opened < MAX_RESTORED_TABS; i++) {
-                    org.json.JSONObject o = arr.optJSONObject(i);
-                    if (o == null) continue;
-                    String u = o.optString("u", "");
-                    String st = o.optString("s", "");
-                    if (u.isEmpty() && st.isEmpty()) continue;
-                    openTab(u.isEmpty() ? null : u, false);
-                    Tab t = tabs.tabs().get(tabs.count() - 1);
-                    if (!st.isEmpty()) {
-                        try {
-                            GeckoSession.SessionState state =
-                                    GeckoSession.SessionState.fromString(st);
-                            if (state != null) t.session.restoreState(state);
-                        } catch (Exception ignored) {}
+        java.util.List<SpaceTabArchive.Entry> list = tabArchive.tabsFor(spaces.activeId());
+        if (list.isEmpty()) {
+            String legacy = prefs.savedTabs();
+            if (legacy != null && legacy.startsWith("[")) {
+                try {
+                    org.json.JSONArray arr = new org.json.JSONArray(legacy);
+                    for (int i = 0; i < arr.length(); i++) {
+                        org.json.JSONObject o = arr.optJSONObject(i);
+                        if (o == null) continue;
+                        String u = o.optString("u", "");
+                        String st = o.optString("s", "");
+                        if (u.isEmpty() && st.isEmpty()) continue;
+                        tabArchive.append(spaces.activeId(), new SpaceTabArchive.Entry(u, st));
                     }
-                    if (i == index) target = opened;
-                    opened++;
-                }
-            } catch (Exception ignored) {}
+                    prefs.spacesTabsJson(tabArchive.dump());
+                    list = tabArchive.tabsFor(spaces.activeId());
+                } catch (Exception ignored) {}
+            }
+        }
+        for (SpaceTabArchive.Entry e : list) {
+            if (opened >= MAX_RESTORED_TABS) break;
+            openTab(e.url.isEmpty() ? null : e.url, false);
+            Tab t = tabs.tabs().get(tabs.count() - 1);
+            if (!e.state.isEmpty()) {
+                try {
+                    GeckoSession.SessionState state =
+                            GeckoSession.SessionState.fromString(e.state);
+                    if (state != null) t.session.restoreState(state);
+                } catch (Exception ignored) {}
+            }
+            opened++;
         }
         if (opened == 0) {
             openTab(null, false);
         } else {
-            tabs.setCurrent(Math.max(0, Math.min(target, opened - 1)));
+            tabs.setCurrent(Math.max(0, Math.min(index, opened - 1)));
             showCurrentWebView();
             updateChrome(tabs.currentTab());
         }
     }
 
+    /** Saves every non-incognito tab into its space's archive (the active
+     *  space's list is replaced wholesale; other spaces keep theirs). */
     private void saveSession() {
         try {
-            org.json.JSONArray arr = new org.json.JSONArray();
+            String activeId = spaces.activeId();
+            java.util.Map<String, java.util.List<SpaceTabArchive.Entry>> groups =
+                    new java.util.LinkedHashMap<>();
             int current = 0;
-            int i = 0;
-            for (Tab t : tabs.tabs()) {
+            int activeIdx = 0;
+            for (int i = 0; i < tabs.tabs().size(); i++) {
+                Tab t = tabs.tabs().get(i);
                 if (t.incognito) continue;
+                String spId = t.spaceId == null ? Spaces.DEFAULT_ID : t.spaceId;
                 String u = t.url == null ? "" : t.url;
                 if (u.startsWith("data:") || u.startsWith("file:")) u = "";
                 if (u.isEmpty() && t.state == null) continue;
-                org.json.JSONObject o = new org.json.JSONObject();
-                o.put("u", u);
-                if (t.state != null) o.put("s", t.state.toString());
-                if (i == tabs.current()) current = arr.length();
-                arr.put(o);
-                i++;
-                if (arr.length() >= MAX_RESTORED_TABS) break;
+                java.util.List<SpaceTabArchive.Entry> group = groups.get(spId);
+                if (group == null) {
+                    group = new java.util.ArrayList<>();
+                    groups.put(spId, group);
+                }
+                group.add(new SpaceTabArchive.Entry(u,
+                        t.state != null ? t.state.toString() : ""));
+                if (i == tabs.current() && activeId.equals(spId)) current = activeIdx;
+                if (activeId.equals(spId)) activeIdx++;
             }
-            prefs.savedTabs(arr.length() == 0 ? "" : arr.toString());
+            for (java.util.Map.Entry<String, java.util.List<SpaceTabArchive.Entry>> en
+                    : groups.entrySet()) {
+                tabArchive.setTabs(en.getKey(), en.getValue());
+            }
+            prefs.spacesTabsJson(tabArchive.dump());
             prefs.savedTabIndex(current);
         } catch (Exception ignored) {}
     }
@@ -2630,6 +2717,271 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
             pushShieldConfig();
             updateChrome(tabs.currentTab());
         }
+    }
+
+    // ---------- Zerium Spaces ----------
+
+    private void persistSpaces() {
+        prefs.spacesJson(spaces.dump());
+    }
+
+    private void persistArchive() {
+        prefs.spacesTabsJson(tabArchive.dump());
+    }
+
+    /** Open normal tabs of the active space (only they live in memory). */
+    private int countForSpace(String spaceId) {
+        int n = 0;
+        for (Tab t : tabs.tabs()) {
+            if (!t.incognito && spaceId.equals(t.spaceId)) n++;
+        }
+        return n;
+    }
+
+    /** Total live tabs of a space: in-memory for the active space,
+     *  archived (url + session state) for the others. */
+    private int spaceTabCount(String spaceId) {
+        return spaceId.equals(spaces.activeId())
+                ? countForSpace(spaceId) : tabArchive.countFor(spaceId);
+    }
+
+    /** Rebuilds the switcher's space chip row. Long-press opens the manager. */
+    private void buildSpaceChips() {
+        if (spaceChips == null) return;
+        spaceChips.removeAllViews();
+        float d = getResources().getDisplayMetrics().density;
+        String activeId = spaces.activeId();
+        for (final Spaces.Space sp : spaces.all()) {
+            spaceChips.addView(spaceChip(sp.name + "  \u00b7  " + spaceTabCount(sp.id),
+                    sp.id.equals(activeId), d,
+                    () -> switchSpace(sp),
+                    () -> showSpacesSheet()));
+        }
+        spaceChips.addView(spaceChip("\u002b " + getString(R.string.spaces_new), false, d,
+                this::showNewSpaceDialog, null));
+    }
+
+    private TextView spaceChip(String text, boolean active, float d,
+                               Runnable onClick, Runnable onLongClick) {
+        TextView chip = new TextView(this);
+        chip.setText(text);
+        chip.setTextSize(13);
+        chip.setSingleLine(true);
+        chip.setPadding((int) (13 * d), (int) (6 * d), (int) (13 * d), (int) (6 * d));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(20 * d);
+        bg.setColor(ContextCompat.getColor(this, active
+                ? R.color.accent : R.color.surface_container_high));
+        chip.setBackground(bg);
+        chip.setTextColor(ContextCompat.getColor(this, active
+                ? R.color.on_accent : R.color.on_surface));
+        chip.setOnClickListener(v -> onClick.run());
+        if (onLongClick != null) {
+            chip.setOnLongClickListener(v -> {
+                onLongClick.run();
+                return true;
+            });
+        }
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, 0, (int) (8 * d), 0);
+        chip.setLayoutParams(lp);
+        return chip;
+    }
+
+    /**
+     * Switches to a space. GeckoView supports one engine runtime per
+     * process, so the browser restarts into the target space: tabs persist
+     * to the archive, the engine relaunches with the space's profile
+     * directory, and its archived tabs restore with cookies intact.
+     */
+    private void switchSpace(Spaces.Space sp) {
+        if (sp == null || sp.id.equals(spaces.activeId())) return;
+        saveSession();
+        spaces.setActive(sp.id);
+        persistSpaces();
+        tabsAdapter.setActiveSpaceId(sp.id);
+        toast(getString(R.string.spaces_switch_restarting, sp.name));
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            try {
+                Intent relaunch = new Intent(this, MainActivity.class);
+                relaunch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                startActivity(relaunch);
+                finishAffinity();
+            } catch (Exception ignored) {
+            } finally {
+                Runtime.getRuntime().exit(0);
+            }
+        }, 350);
+    }
+
+    private void showSpacesSheet() {
+        SpacesSheet.show(this, new SpacesSheet.Host() {
+            @Override
+            public Spaces spaces() {
+                return spaces;
+            }
+
+            @Override
+            public int tabCount(String spaceId) {
+                return spaceTabCount(spaceId);
+            }
+
+            @Override
+            public String footerText() {
+                return getString(R.string.spaces_footer_gecko);
+            }
+
+            @Override
+            public void onSwitch(Spaces.Space space) {
+                switchSpace(space);
+            }
+
+            @Override
+            public void onNewSpace() {
+                showNewSpaceDialog();
+            }
+
+            @Override
+            public void onRename(Spaces.Space space) {
+                showRenameDialog(space);
+            }
+
+            @Override
+            public void onDelete(Spaces.Space space) {
+                deleteSpace(space);
+            }
+        });
+    }
+
+    private void showNewSpaceDialog() {
+        SpacesSheet.promptNewSpace(this, true, (name, isolated) -> {
+            Spaces.Space sp = spaces.create(name, isolated);
+            if (sp == null) return;
+            persistSpaces();
+            buildSpaceChips();
+            toast(R.string.spaces_created);
+        });
+    }
+
+    private void showRenameDialog(final Spaces.Space sp) {
+        SpacesSheet.promptRename(this, sp.name, (name, unused) -> {
+            spaces.rename(sp.id, name);
+            persistSpaces();
+            buildSpaceChips();
+        });
+    }
+
+    private void deleteSpace(final Spaces.Space sp) {
+        if (sp == null || sp.id.equals(Spaces.DEFAULT_ID)) {
+            toast(R.string.spaces_default_locked);
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.spaces_delete_title, sp.name))
+                .setMessage(getString(R.string.spaces_delete_confirm,
+                        sp.name, spaceTabCount(sp.id)))
+                .setPositiveButton(R.string.delete, (dlg, w) -> reallyDeleteSpace(sp))
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    private void reallyDeleteSpace(Spaces.Space sp) {
+        boolean isActive = sp.id.equals(spaces.activeId());
+        tabArchive.remove(sp.id);
+        persistArchive();
+        spaces.remove(sp.id);
+        persistSpaces();
+        if (isActive && SpaceRuntime.isIsolated(sp)) {
+            // The engine runs with this space's profile directory: switch to
+            // the default space now, wipe the directory after the restart.
+            String pending = prefs.pendingSpaceDirs();
+            if (!pending.contains(sp.id)) {
+                prefs.pendingSpaceDirs(pending.isEmpty() ? sp.id : pending + "," + sp.id);
+            }
+            toast(getString(R.string.spaces_switch_restarting, spaces.active().name));
+            restartForSpace();
+            return;
+        }
+        if (SpaceRuntime.isIsolated(sp)) SpaceRuntime.deleteDir(this, sp.id);
+        if (isActive) {
+            tabsAdapter.setActiveSpaceId(spaces.activeId());
+            closeActiveSpaceTabsInMemory();
+        }
+        if (tabs.count() == 0) openTab(null, false);
+        else {
+            showCurrentWebView();
+            updateChrome(tabs.currentTab());
+        }
+        tabsAdapter.notifyDataSetChanged();
+        buildSpaceChips();
+        toast(R.string.spaces_deleted);
+    }
+
+    /** Process restart used for space switches (single runtime per process). */
+    private void restartForSpace() {
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            try {
+                Intent relaunch = new Intent(this, MainActivity.class);
+                relaunch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                startActivity(relaunch);
+                finishAffinity();
+            } catch (Exception ignored) {
+            } finally {
+                Runtime.getRuntime().exit(0);
+            }
+        }, 350);
+    }
+
+    /** Long-press on a tab card: move it to another space. Cross-profile
+     *  moves archive the tab (it opens under the target space's profile on
+     *  switch); same-profile moves just re-tag it. */
+    private void showMoveTabDialog(final Tab t) {
+        if (t.incognito) {
+            toast(R.string.spaces_no_incognito);
+            return;
+        }
+        final java.util.List<Spaces.Space> targets = new java.util.ArrayList<>();
+        java.util.List<String> names = new java.util.ArrayList<>();
+        for (Spaces.Space sp : spaces.all()) {
+            if (sp.id.equals(t.spaceId)) continue;
+            targets.add(sp);
+            names.add(sp.isolated ? sp.name + "  \u00b7  "
+                    + getString(R.string.spaces_badge_isolated) : sp.name);
+        }
+        if (targets.isEmpty()) return;
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.spaces_move_title)
+                .setMessage(R.string.spaces_move_note)
+                .setItems(names.toArray(new String[0]), (dlg, which) ->
+                        moveTabToSpace(t, targets.get(which)))
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    private void moveTabToSpace(Tab t, Spaces.Space target) {
+        if (t == null || target == null || target.id.equals(t.spaceId)) return;
+        Spaces.Space source = spaces.get(t.spaceId);
+        boolean sameProfile = !SpaceRuntime.isIsolated(source)
+                && !SpaceRuntime.isIsolated(target);
+        if (sameProfile) {
+            t.spaceId = target.id;
+            persistSpaces();
+            tabsAdapter.notifyDataSetChanged();
+            buildSpaceChips();
+            return;
+        }
+        // Cross-profile: the session cannot hop engine profiles. Archive it
+        // into the target space (restores there on switch) and close it.
+        String u = t.url == null ? "" : t.url;
+        if (u.startsWith("data:") || u.startsWith("file:")) u = "";
+        tabArchive.append(target.id, new SpaceTabArchive.Entry(u,
+                t.state != null ? t.state.toString() : ""));
+        persistArchive();
+        closeTab(t);
+        buildSpaceChips();
     }
 
     @Override

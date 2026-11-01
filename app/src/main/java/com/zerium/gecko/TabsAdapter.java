@@ -19,12 +19,15 @@ public class TabsAdapter extends RecyclerView.Adapter<TabsAdapter.VH> {
     public interface Listener {
         void onOpen(Tab tab);
         void onClose(Tab tab);
+        /** Long-press a card: move the tab to another Zerium Space. */
+        void onLongPress(Tab tab);
     }
 
     private final java.util.List<Tab> tabs;
     private final TabManager manager;
     private final Listener listener;
     private String query = "";
+    private String activeSpaceId = Spaces.DEFAULT_ID;
 
     public TabsAdapter(java.util.List<Tab> tabs, TabManager manager, Listener listener) {
         this.tabs = tabs;
@@ -38,13 +41,23 @@ public class TabsAdapter extends RecyclerView.Adapter<TabsAdapter.VH> {
         notifyDataSetChanged();
     }
 
+    /** Space whose tabs the switcher shows (plus all private tabs). */
+    public void setActiveSpaceId(String spaceId) {
+        activeSpaceId = spaceId == null ? Spaces.DEFAULT_ID : spaceId;
+        notifyDataSetChanged();
+    }
+
     private java.util.List<Tab> shown() {
-        if (query.isEmpty()) return tabs;
         java.util.List<Tab> out = new java.util.ArrayList<>();
         for (Tab t : tabs) {
-            String title = t.title == null ? "" : t.title.toLowerCase();
-            String url = t.url == null ? "" : t.url.toLowerCase();
-            if (title.contains(query) || url.contains(query)) out.add(t);
+            // Spaces scope: active space's tabs + incognito (no space).
+            if (!t.incognito && !activeSpaceId.equals(t.spaceId)) continue;
+            if (!query.isEmpty()) {
+                String title = t.title == null ? "" : t.title.toLowerCase();
+                String url = t.url == null ? "" : t.url.toLowerCase();
+                if (!title.contains(query) && !url.contains(query)) continue;
+            }
+            out.add(t);
         }
         return out;
     }
@@ -74,6 +87,10 @@ public class TabsAdapter extends RecyclerView.Adapter<TabsAdapter.VH> {
                 R.color.primary));
         h.itemView.setOnClickListener(v -> listener.onOpen(t));
         h.close.setOnClickListener(v -> listener.onClose(t));
+        h.itemView.setOnLongClickListener(v -> {
+            if (!t.incognito) listener.onLongPress(t);
+            return true;
+        });
     }
 
     private static String displayHost(Tab t) {

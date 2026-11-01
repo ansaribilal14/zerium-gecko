@@ -113,6 +113,22 @@ public class Prefs {
     public int savedTabIndex() { return sp.getInt("saved_tab_index", 0); }
     public void savedTabIndex(int v) { sp.edit().putInt("saved_tab_index", v).apply(); }
 
+    // Zerium Spaces
+    /** Persisted spaces document (see Spaces.dump/load); includes the active id. */
+    public String spacesJson() { return sp.getString("spaces_json", ""); }
+    public void spacesJson(String v) { sp.edit().putString("spaces_json", v == null ? "" : v).apply(); }
+    /** Per-space archived tabs (see SpaceTabArchive). */
+    public String spacesTabsJson() { return sp.getString("spaces_tabs_json", ""); }
+    public void spacesTabsJson(String v) {
+        sp.edit().putString("spaces_tabs_json", v == null ? "" : v).apply();
+    }
+    /** Space profile directories to wipe on next launch (deleting the
+     *  running space's directory requires the restart that switches it). */
+    public String pendingSpaceDirs() { return sp.getString("space_dirs_pending", ""); }
+    public void pendingSpaceDirs(String v) {
+        sp.edit().putString("space_dirs_pending", v == null ? "" : v).apply();
+    }
+
     // Blocked counter (fed by the extension over native messaging)
     public long totalBlocked() { return sp.getLong("total_blocked", 0L); }
     public void addTotalBlocked(long n) {
