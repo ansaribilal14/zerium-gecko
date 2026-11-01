@@ -1,7 +1,7 @@
 package com.zerium.gecko;
 
 import android.app.AlertDialog;
-import android.app.RoleManager;
+import android.app.role.RoleManager;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
