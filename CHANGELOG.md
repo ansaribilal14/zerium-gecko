@@ -8,6 +8,20 @@ All notable changes to Zerium G are documented in this file (Keep a Changelog fo
 - Torrent engine evaluation (APK-size tradeoff), DASH assembly, encrypted HLS — see the download track in ROADMAP.
 - Spaces follow-ups: per-space colored identities, per-space add-on presets documented at creation time.
 
+## [1.6.0] — 2026-11-01
+
+The "tab groups inside Spaces + a real Android browser citizen" release, mirroring the same two features that landed in Zerium Browser 1.12.0.
+
+### Added
+- **Tab Groups inside Spaces** — Chrome-style drag-and-drop grouping within the active space. Long-press a card and drag: drop it on another tab to start a group, on a group's header or a member to join that group, on the "Ungrouped" header or empty space to ungroup, and on a Space chip to move it to that space. Groups render as coloured header rows (8-colour palette) with a live tab count and a collapse chevron; collapsed groups keep their tabs running. Long-press a header to rename, recolour or ungroup all. The switcher's tab search keeps working across the group structure.
+- **Sessions are never recreated for organization** — grouping is pure metadata (`Tab.groupId`): moving tabs between groups never touches the GeckoSession, its history or the space's engine profile. Groups persist per space, ride along the per-space tab archive (each archived tab keeps its group), survive space switches and app restarts, and disappear when their last member leaves.
+- **Default browser support** — Settings → Links → "Default browser" requests `RoleManager.ROLE_BROWSER` on Android 10+, so Zerium G appears in other apps' link choosers and can be set as the system default. Below Android 10 the row opens the system default-apps screen. The app only requests the role — Android owns the dialog.
+- **External links open in** (Settings → Links) — where links handed over by other apps land: *Default space* (default), *Current space*, or *Ask every time* with a space picker. Only http(s) URLs are accepted. The engine runs one profile per process, so the router honours isolation honestly: links land on the shared default profile only while the active space is non-isolated, and a link bound for a different isolated space is parked and opens right after the space-switch restart — it can never silently ride another space's cookies.
+
+### Notes
+- Quick long-press (no drag) on a tab card keeps the old behaviour: the move-to-space dialog. Private tabs stay out of groups, as they stay out of spaces.
+- Feature specs live in `docs/issues/` (the repo token cannot open GitHub issues).
+
 ## [1.5.0] — 2026-11-01
 
 The Zerium Spaces release: tab groups with per-space logins — one isolated space per identity, with a real engine profile directory behind each.

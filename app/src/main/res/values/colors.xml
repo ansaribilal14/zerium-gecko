@@ -51,4 +51,13 @@
     <color name="border">#E2E2EA</color>
     <color name="ic_launcher_bg">#0B0F1A</color>
     <color name="ic_launcher_accent">#7C9CFF</color>
+    <!-- Tab group palette (index order matches TabsAdapter.GROUP_COLORS) -->
+    <color name="group_blue">#4C8DF6</color>
+    <color name="group_teal">#26A69A</color>
+    <color name="group_green">#66BB6A</color>
+    <color name="group_yellow">#FBC02D</color>
+    <color name="group_orange">#FB8C42</color>
+    <color name="group_red">#EF5350</color>
+    <color name="group_pink">#EC407A</color>
+    <color name="group_purple">#7E57C2</color>
 </resources>

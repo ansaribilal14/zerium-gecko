@@ -122,6 +122,30 @@ public class Prefs {
     public void spacesTabsJson(String v) {
         sp.edit().putString("spaces_tabs_json", v == null ? "" : v).apply();
     }
+
+    // Zerium Tab Groups (inside Spaces)
+    /** Persisted tab-group document (see TabGroups.dump/load). */
+    public String tabGroupsJson() { return sp.getString("tab_groups_json", ""); }
+    public void tabGroupsJson(String v) {
+        sp.edit().putString("tab_groups_json", v == null ? "" : v).apply();
+    }
+
+    // External links
+    /** Where links from other apps open: 0 default space, 1 current space, 2 ask. */
+    public static final int LINKS_DEFAULT = 0;
+    public static final int LINKS_CURRENT = 1;
+    public static final int LINKS_ASK = 2;
+    public int externalLinks() { return sp.getInt("external_links", LINKS_DEFAULT); }
+    public void externalLinks(int v) { sp.edit().putInt("external_links", v).apply(); }
+    /**
+     * Link parked while switching into an isolated space: GeckoView runs one
+     * engine profile per process, so a link bound for a different isolated
+     * space opens right after the space-switch restart.
+     */
+    public String pendingLink() { return sp.getString("pending_link", ""); }
+    public void pendingLink(String v) {
+        sp.edit().putString("pending_link", v == null ? "" : v).apply();
+    }
     /** Space profile directories to wipe on next launch (deleting the
      *  running space's directory requires the restart that switches it). */
     public String pendingSpaceDirs() { return sp.getString("space_dirs_pending", ""); }

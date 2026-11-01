@@ -25,10 +25,17 @@ public final class SpaceTabArchive {
     public static final class Entry {
         public final String url;
         public final String state;
+        /** Tab group inside the space (null = ungrouped; see TabGroups). */
+        public final String groupId;
 
         public Entry(String url, String state) {
+            this(url, state, null);
+        }
+
+        public Entry(String url, String state, String groupId) {
             this.url = url == null ? "" : url;
             this.state = state == null ? "" : state;
+            this.groupId = groupId == null || groupId.isEmpty() ? null : groupId;
         }
 
         JSONObject toJson() {
@@ -36,13 +43,15 @@ public final class SpaceTabArchive {
             try {
                 o.put("u", url);
                 if (!state.isEmpty()) o.put("s", state);
+                if (groupId != null) o.put("g", groupId);
             } catch (Exception ignored) {}
             return o;
         }
 
         static Entry fromJson(JSONObject o) {
             if (o == null) return null;
-            return new Entry(o.optString("u", ""), o.optString("s", ""));
+            return new Entry(o.optString("u", ""), o.optString("s", ""),
+                    o.optString("g", ""));
         }
     }
 

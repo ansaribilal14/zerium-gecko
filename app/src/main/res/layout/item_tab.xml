@@ -58,6 +58,16 @@
             android:paddingEnd="4dp"
             android:paddingBottom="10dp">
 
+            <!-- Chrome-style group colour dot (visible for grouped tabs). -->
+            <View
+                android:id="@+id/tabGroupDot"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_gravity="center_vertical"
+                android:layout_marginStart="2dp"
+                android:layout_marginEnd="6dp"
+                android:visibility="gone" />
+
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"

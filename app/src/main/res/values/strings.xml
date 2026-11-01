@@ -90,6 +90,21 @@
         <item>Light</item>
         <item>Dark</item>
     </string-array>
+    <string-array name="external_link_modes">
+        <item>Default space</item>
+        <item>Current space</item>
+        <item>Ask every time</item>
+    </string-array>
+    <string-array name="group_colors">
+        <item>@string/group_color_blue</item>
+        <item>@string/group_color_teal</item>
+        <item>@string/group_color_green</item>
+        <item>@string/group_color_yellow</item>
+        <item>@string/group_color_orange</item>
+        <item>@string/group_color_red</item>
+        <item>@string/group_color_pink</item>
+        <item>@string/group_color_purple</item>
+    </string-array>
     <string name="allowlist">Site allowlist</string>
     <string name="allowlist_title">Site allowlist</string>
     <string name="allowlist_hint">One domain per line, e.g. example.com</string>
@@ -316,4 +331,36 @@
     <string name="spaces_no_incognito">Private tabs don\'t belong to spaces</string>
     <string name="spaces_delete_scope">Clears the running engine profile — the current space\'s data. Other isolated spaces keep their own profiles.</string>
     <string name="spaces_footer_gecko">Isolated spaces run their own engine profile: separate logins, site data and add-ons. Switching spaces restarts the browser engine.</string>
+
+    <!-- Tab groups (inside Spaces) -->
+    <string name="tab_groups_ungrouped">Ungrouped tabs</string>
+    <string name="tab_groups_ungrouped_hint">Drop a tab here to ungroup</string>
+    <string name="group_new_name">New group</string>
+    <string name="group_rename_title">Rename group</string>
+    <string name="group_rename">Rename</string>
+    <string name="group_colour">Group colour</string>
+    <string name="group_ungroup_all">Ungroup all</string>
+    <string name="group_removed">Group removed</string>
+    <string name="group_renamed">Group renamed</string>
+    <string name="group_color_blue">Blue</string>
+    <string name="group_color_teal">Teal</string>
+    <string name="group_color_green">Green</string>
+    <string name="group_color_yellow">Yellow</string>
+    <string name="group_color_orange">Orange</string>
+    <string name="group_color_red">Red</string>
+    <string name="group_color_pink">Pink</string>
+    <string name="group_color_purple">Purple</string>
+
+    <!-- Links / default browser -->
+    <string name="settings_links">Links</string>
+    <string name="default_browser">Default browser</string>
+    <string name="default_browser_sub">Open web links from other apps in Zerium G</string>
+    <string name="default_browser_set">Set as default browser</string>
+    <string name="default_browser_on">Zerium G is your default browser</string>
+    <string name="default_browser_toast">Zerium G is now the default browser</string>
+    <string name="default_browser_open_settings">Choose Zerium G in Android\'s default-apps settings</string>
+    <string name="external_links">External links open in</string>
+    <string name="external_links_sub">Where links from other apps land</string>
+    <string name="external_links_pick">Open link in\u2026</string>
+    <string name="link_opening_in">Opening link in %1$s\u2026</string>
 </resources>
