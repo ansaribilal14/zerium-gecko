@@ -325,6 +325,14 @@
                     android:paddingBottom="6dp" />
             </HorizontalScrollView>
 
+            <!-- Dedicated group-detail grid (opens when a group card is
+                 tapped); covers the search box and the overview grid while
+                 open, Space chip bar stays reachable above it. -->
+            <include
+                android:id="@+id/groupDetail"
+                layout="@layout/view_group_detail"
+                android:visibility="gone" />
+
             <EditText
                 android:id="@+id/searchTabs"
                 android:layout_width="match_parent"

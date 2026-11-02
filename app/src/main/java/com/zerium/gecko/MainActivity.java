@@ -140,11 +140,21 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
     private TextView noMatchingTabs;
     private ItemTouchHelper dragHelper;
 
+    // Dedicated group-detail surface (Chrome-style group grid)
+    private View groupDetail;
+    private RecyclerView groupGrid;
+    private TabsAdapter groupAdapter;
+    private TabGroups.Group detailGroup;
+    private ItemTouchHelper groupDragHelper;
+    private View newTabFab;
+
     // Long-press drag state (tab grouping inside the active space)
     private Tab draggedTab;
     private float dragDistance;
     private float dragLastX, dragLastY;
     private RecyclerView.ViewHolder hoverVH;
+    /** RecyclerView the running drag started from (overview vs detail grid). */
+    private RecyclerView dragSourceRv;
     private FrameLayout fullscreenContainer;
     private View fullscreenView;
     private GeckoSession fullscreenSession;
@@ -336,15 +346,13 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
             }
 
             @Override
-            public void onLongPress(Tab tab) {
-                showMoveTabDialog(tab);
+            public void onTabMenu(Tab tab) {
+                showTabContextMenu(tab);
             }
 
             @Override
-            public void onGroupToggle(TabGroups.Group group) {
-                tabGroups.setCollapsed(group.id, !group.collapsed);
-                persistGroups();
-                tabsAdapter.notifyDataSetChanged();
+            public void onOpenGroup(TabGroups.Group group) {
+                showGroupDetail(group);
             }
 
             @Override
@@ -354,7 +362,7 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         });
         tabsAdapter.setActiveSpaceId(spaces.activeId());
         tabsGrid.setAdapter(tabsAdapter);
-        dragHelper = buildDragHelper();
+        dragHelper = buildDragHelper(tabsGrid);
         dragHelper.attachToRecyclerView(tabsGrid);
         tabsAdapter.setDragStarter(vh -> dragHelper.startDrag(vh));
         tabSearch.addTextChangedListener(new android.text.TextWatcher() {
@@ -366,6 +374,52 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
                         ? View.VISIBLE : View.GONE);
             }
         });
+
+        // Dedicated group-detail grid (same adapter class, detail mode).
+        newTabFab = findViewById(R.id.btnNewTab);
+        groupDetail = findViewById(R.id.groupDetail);
+        groupGrid = groupDetail.findViewById(R.id.groupGrid);
+        groupGrid.setLayoutManager(new GridLayoutManager(this, 2));
+        groupAdapter = new TabsAdapter(tabs.tabs(), tabs, tabGroups,
+                new TabsAdapter.Listener() {
+                    @Override
+                    public void onOpen(Tab tab) {
+                        hideTabSwitcher();
+                        switchTab(tab);
+                    }
+
+                    @Override
+                    public void onClose(Tab tab) {
+                        closeTab(tab);
+                    }
+
+                    @Override
+                    public void onTabMenu(Tab tab) {
+                        showTabContextMenu(tab);
+                    }
+
+                    @Override
+                    public void onOpenGroup(TabGroups.Group group) { }
+
+                    @Override
+                    public void onGroupMenu(TabGroups.Group group) {
+                        showGroupMenu(group);
+                    }
+                });
+        groupGrid.setAdapter(groupAdapter);
+        groupDragHelper = buildDragHelper(groupGrid);
+        groupDragHelper.attachToRecyclerView(groupGrid);
+        groupAdapter.setDragStarter(vh -> groupDragHelper.startDrag(vh));
+        groupDetail.findViewById(R.id.btnGroupDetailBack)
+                .setOnClickListener(v -> closeGroupDetail());
+        groupDetail.findViewById(R.id.btnGroupDetailMenu)
+                .setOnClickListener(v -> {
+                    if (detailGroup != null) showGroupMenu(detailGroup);
+                });
+        groupDetail.findViewById(R.id.btnGroupAddTab).setOnClickListener(v -> {
+            if (detailGroup != null) openTabInGroup(detailGroup);
+        });
+
         findViewById(R.id.btnSwitcherData).setOnClickListener(v -> deleteBrowsingData());
         findViewById(R.id.btnNewTab).setOnClickListener(v -> {
             hideTabSwitcher();
@@ -843,11 +897,15 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         if (tabs.count() == 0) {
             openTab(null, false);
             tabsAdapter.notifyDataSetChanged();
+            if (groupAdapter != null) groupAdapter.notifyDataSetChanged();
+            syncDetail();
             return;
         }
         showCurrentWebView();
         updateChrome(tabs.currentTab());
         tabsAdapter.notifyDataSetChanged();
+        if (groupAdapter != null) groupAdapter.notifyDataSetChanged();
+        syncDetail();
     }
 
     /** Closes the active space's tabs (the switcher's current view scope). */
@@ -2737,6 +2795,7 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
     }
 
     private void hideTabSwitcher() {
+        closeGroupDetail();
         tabSwitcher.setVisibility(View.GONE);
     }
 
@@ -2962,6 +3021,7 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
      */
     private void switchSpace(Spaces.Space sp) {
         if (sp == null || sp.id.equals(spaces.activeId())) return;
+        closeGroupDetail(); // a group detail always belongs to one space
         saveSession();
         spaces.setActive(sp.id);
         persistSpaces();
@@ -3140,7 +3200,7 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
             pruneEmptyGroups(oldSpace, null);
             persistGroups();
             persistSpaces();
-            tabsAdapter.notifyDataSetChanged();
+            refreshGroupUi();
             buildSpaceChips();
             return;
         }
@@ -3158,24 +3218,10 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
 
     // ---------- Tab groups (inside Spaces) ----------
 
-    /**
-     * Long-press drag engine for grouping. Long-press starts a drag; the
-     * drop position decides the action:
-     * <ul>
-     *   <li>release without moving — the old long-press behaviour (move to
-     *       another space),</li>
-     *   <li>drop on a space chip — move the tab to that space,</li>
-     *   <li>drop on a tab — group the pair (or join the target's group),</li>
-     *   <li>drop on a group header — join that group,</li>
-     *   <li>drop on the "Ungrouped" header or empty space — ungroup.</li>
-     * </ul>
-     * The dragged tab's GeckoSession is never recreated: only its group id
-     * moves.
-     */
-    private ItemTouchHelper buildDragHelper() {
+    private ItemTouchHelper buildDragHelper(final RecyclerView rv) {
         return new ItemTouchHelper(new ItemTouchHelper.Callback() {
             @Override
-            public int getMovementFlags(@NonNull RecyclerView rv,
+            public int getMovementFlags(@NonNull RecyclerView rgv,
                                         @NonNull RecyclerView.ViewHolder vh) {
                 return makeMovementFlags(ItemTouchHelper.UP | ItemTouchHelper.DOWN
                         | ItemTouchHelper.LEFT | ItemTouchHelper.RIGHT, 0);
@@ -3187,7 +3233,7 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
             }
 
             @Override
-            public boolean onMove(@NonNull RecyclerView rv,
+            public boolean onMove(@NonNull RecyclerView rgv,
                                   @NonNull RecyclerView.ViewHolder vh,
                                   @NonNull RecyclerView.ViewHolder target) {
                 return false; // ordering is session order; drag only groups
@@ -3200,6 +3246,7 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
             public void onSelectedChanged(RecyclerView.ViewHolder vh, int actionState) {
                 if (vh != null) {
                     draggedTab = tabAt(vh);
+                    dragSourceRv = rv;
                     dragDistance = 0f;
                     vh.itemView.setAlpha(0.9f);
                     vh.itemView.setScaleX(1.04f);
@@ -3208,36 +3255,37 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
                     if (draggedTab != null) {
                         resolveDrop();
                         // restore visuals (resolveDrop may have rebound rows)
-                        tabsAdapter.notifyDataSetChanged();
+                        refreshGroupUi();
                     }
                     setHover(hoverVH, false);
                     hoverVH = null;
                     draggedTab = null;
+                    dragSourceRv = null;
                 }
                 super.onSelectedChanged(vh, actionState);
             }
 
             @Override
-            public void onChildDraw(@NonNull Canvas c, @NonNull RecyclerView rv,
+            public void onChildDraw(@NonNull Canvas c, @NonNull RecyclerView rgv,
                                     @NonNull RecyclerView.ViewHolder vh,
                                     float dX, float dY, int actionState,
                                     boolean isCurrentlyActive) {
                 if (isCurrentlyActive && actionState == ItemTouchHelper.ACTION_STATE_DRAG) {
-                    updateDragPointer(vh, dX, dY);
+                    updateDragPointer(rv, vh, dX, dY);
                     dragDistance = Math.max(dragDistance,
                             (float) Math.hypot(dX, dY));
-                    updateHover();
+                    updateHover(rv);
                 }
-                super.onChildDraw(c, rv, vh, dX, dY, actionState, isCurrentlyActive);
+                super.onChildDraw(c, rgv, vh, dX, dY, actionState, isCurrentlyActive);
             }
 
             @Override
-            public void clearView(@NonNull RecyclerView rv,
+            public void clearView(@NonNull RecyclerView rgv,
                                   @NonNull RecyclerView.ViewHolder vh) {
                 vh.itemView.setAlpha(1f);
                 vh.itemView.setScaleX(1f);
                 vh.itemView.setScaleY(1f);
-                super.clearView(rv, vh);
+                super.clearView(rgv, vh);
             }
         });
     }
@@ -3248,16 +3296,17 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
     }
 
     /** Screen-space centre of the dragged card, from layout pos + drag delta. */
-    private void updateDragPointer(RecyclerView.ViewHolder vh, float dX, float dY) {
+    private void updateDragPointer(RecyclerView rv, RecyclerView.ViewHolder vh,
+                                   float dX, float dY) {
         int[] loc = new int[2];
-        tabsGrid.getLocationOnScreen(loc);
+        rv.getLocationOnScreen(loc);
         dragLastX = loc[0] + vh.itemView.getLeft() + dX + vh.itemView.getWidth() / 2f;
         dragLastY = loc[1] + vh.itemView.getTop() + dY + vh.itemView.getHeight() / 2f;
     }
 
-    private void updateHover() {
+    private void updateHover(RecyclerView rv) {
         if (draggedTab == null) return;
-        RecyclerView.ViewHolder h = hoverTargetAt(dragLastX, dragLastY);
+        RecyclerView.ViewHolder h = hoverTargetAt(rv, dragLastX, dragLastY);
         if (h == hoverVH) return;
         setHover(hoverVH, false);
         hoverVH = h;
@@ -3266,27 +3315,29 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
 
     private void setHover(RecyclerView.ViewHolder h, boolean on) {
         if (h == null) return;
-        h.itemView.setAlpha(on ? 0.7f : 1f);
+        View it = h.itemView;
+        it.setAlpha(on ? 0.7f : 1f);
     }
 
-    /** What the given screen point hovers over: a Tab card, a Group header,
-     *  the "Ungrouped" header tag — or null for empty space. */
-    private Object dropTargetAt(float screenX, float screenY) {
+    /** What the given screen point hovers over: a Tab card, a group card —
+     *  or null for empty space (the ungroup drop zone). */
+    private Object dropTargetAt(RecyclerView rv, float screenX, float screenY) {
         int[] loc = new int[2];
-        tabsGrid.getLocationOnScreen(loc);
-        View child = tabsGrid.findChildViewUnder(screenX - loc[0], screenY - loc[1]);
+        rv.getLocationOnScreen(loc);
+        View child = rv.findChildViewUnder(screenX - loc[0], screenY - loc[1]);
         if (child == null) return null;
-        RecyclerView.ViewHolder h = tabsGrid.getChildViewHolder(child);
+        RecyclerView.ViewHolder h = rv.getChildViewHolder(child);
         if (draggedTab != null && tabAt(h) == draggedTab) return null;
         return child.getTag();
     }
 
-    private RecyclerView.ViewHolder hoverTargetAt(float screenX, float screenY) {
+    private RecyclerView.ViewHolder hoverTargetAt(RecyclerView rv,
+                                                  float screenX, float screenY) {
         int[] loc = new int[2];
-        tabsGrid.getLocationOnScreen(loc);
-        View child = tabsGrid.findChildViewUnder(screenX - loc[0], screenY - loc[1]);
+        rv.getLocationOnScreen(loc);
+        View child = rv.findChildViewUnder(screenX - loc[0], screenY - loc[1]);
         if (child == null) return null;
-        RecyclerView.ViewHolder h = tabsGrid.getChildViewHolder(child);
+        RecyclerView.ViewHolder h = rv.getChildViewHolder(child);
         if (draggedTab != null && tabAt(h) == draggedTab) return null;
         return h;
     }
@@ -3311,103 +3362,358 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
     private void resolveDrop() {
         final Tab t = draggedTab;
         if (t == null) return;
-        // Bare long-press (no real movement): keep the move-to-space dialog.
+        // Bare long-press (no real movement): the tab context menu.
         if (dragDistance < 20 * getResources().getDisplayMetrics().density) {
-            showMoveTabDialog(t);
+            showTabContextMenu(t);
             return;
         }
         Spaces.Space chip = chipAt(dragLastX, dragLastY);
         if (chip != null) {
-            if (!chip.id.equals(t.spaceId)) moveTabToSpace(t, chip);
+            if (t.incognito) toast(R.string.spaces_no_incognito);
+            else if (!chip.id.equals(t.spaceId)) moveTabToSpace(t, chip);
             return;
         }
-        Object target = dropTargetAt(dragLastX, dragLastY);
+        // Incognito tabs never group (they belong to no Space).
+        if (t.incognito) {
+            toast(R.string.spaces_no_incognito);
+            return;
+        }
+        RecyclerView src = dragSourceRv != null ? dragSourceRv : tabsGrid;
+        Object target = dropTargetAt(src, dragLastX, dragLastY);
         if (target instanceof Tab) {
             Tab o = (Tab) target;
-            if (o == t || o.incognito || !o.spaceId.equals(t.spaceId)) return;
-            TabGroups.Group og = o.groupId == null ? null : tabGroups.get(o.groupId);
-            if (og != null) {
-                assignToGroup(t, og);
-            } else if (t.groupId != null) {
+            int action = GroupOps.decideTabDrop(t, o);
+            if (action == GroupOps.DROP_JOIN_TARGET_GROUP) {
+                TabGroups.Group og = tabGroups.get(o.groupId);
+                if (og != null && GroupOps.mayJoin(t, og)) assignToGroup(t, og);
+            } else if (action == GroupOps.DROP_UNGROUP) {
                 ungroup(t);
-            } else {
+            } else if (action == GroupOps.DROP_CREATE_PAIR) {
                 createGroupWith(t, o);
             }
             return;
         }
         if (target instanceof TabGroups.Group) {
-            assignToGroup(t, (TabGroups.Group) target);
+            TabGroups.Group g = (TabGroups.Group) target;
+            if (GroupOps.mayJoin(t, g)) assignToGroup(t, g);
             return;
         }
-        if (target == TabsAdapter.TAG_UNGROUPED) {
-            ungroup(t);
-            return;
-        }
+        // Empty grid space: the ungroup drop zone (main overview and the
+        // group-detail grid, where this is the drag-out gesture).
         if (t.groupId != null) ungroup(t);
     }
 
-    private void assignToGroup(Tab t, TabGroups.Group g) {
-        if (t == null || g == null || !g.spaceId.equals(t.spaceId)) return;
-        if (g.id.equals(t.groupId)) return;
-        t.groupId = g.id;
-        pruneEmptyGroups(t.spaceId, g.id);
-        // A tab dropped into a collapsed group expands it so the move is visible.
-        if (g.collapsed) tabGroups.setCollapsed(g.id, false);
+    /** Re-binds both grids after any group-metadata change. Grouping only
+     *  moves {@code groupId}; no GeckoSession is ever recreated here. */
+    private void refreshGroupUi() {
+        tabsAdapter.notifyDataSetChanged();
+        if (groupAdapter != null) groupAdapter.notifyDataSetChanged();
+        syncDetail();
+    }
+
+    /** Keeps the detail overlay consistent; closes it when the group is gone. */
+    private void syncDetail() {
+        if (detailGroup == null || groupDetail == null) return;
+        TabGroups.Group live = tabGroups.get(detailGroup.id);
+        if (live == null || !GroupOps.hasMember(tabs.tabs(), live.id)) {
+            closeGroupDetail();
+            return;
+        }
+        detailGroup = live;
+        bindGroupDetailHeader(live);
+    }
+
+    // ---------- Group detail (dedicated grid) ----------
+
+    /** Opens the dedicated group-detail grid for one group card tap. */
+    private void showGroupDetail(TabGroups.Group g) {
+        if (g == null || tabGroups.get(g.id) == null) return;
+        if (!g.spaceId.equals(spaces.activeId())) return;
+        detailGroup = g;
+        groupAdapter.setDetailGroupId(g.id);
+        groupAdapter.setActiveSpaceId(g.spaceId);
+        bindGroupDetailHeader(g);
+        groupDetail.setVisibility(View.VISIBLE);
+        newTabFab.setVisibility(View.GONE);
+        tabsAdapter.notifyDataSetChanged();
+        groupAdapter.notifyDataSetChanged();
+    }
+
+    private void bindGroupDetailHeader(TabGroups.Group g) {
+        int count = GroupRowPlanner.memberCount(tabs.tabs(), g);
+        View dot = groupDetail.findViewById(R.id.groupDetailDot);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(groupColor(this, g.color));
+        dot.setBackground(bg);
+        TextView title = groupDetail.findViewById(R.id.groupDetailTitle);
+        title.setText(g.name + "  \u00b7  "
+                + getString(R.string.spaces_tab_count, count));
+        TextView empty = groupDetail.findViewById(R.id.groupDetailEmpty);
+        empty.setVisibility(count == 0 ? View.VISIBLE : View.GONE);
+    }
+
+    private void closeGroupDetail() {
+        detailGroup = null;
+        if (groupDetail != null) groupDetail.setVisibility(View.GONE);
+        if (newTabFab != null) newTabFab.setVisibility(View.VISIBLE);
+        if (groupAdapter != null) groupAdapter.setDetailGroupId(null);
+    }
+
+    /**
+     * The group-detail FAB: creates a tab that joins this group and the
+     * current Space. The switcher and the detail grid stay open so the new
+     * card is immediately visible. A brand-new tab, so a new session here is
+     * expected — existing tabs keep their sessions untouched.
+     */
+    private void openTabInGroup(TabGroups.Group g) {
+        if (g == null || tabGroups.get(g.id) == null) return;
+        if (!g.spaceId.equals(spaces.activeId())) return;
+        openTab(null, false, g.spaceId);
+        Tab nt = tabs.tabs().get(tabs.count() - 1);
+        nt.groupId = g.id;
         persistGroups();
         tabsAdapter.notifyDataSetChanged();
+        groupAdapter.notifyDataSetChanged();
+        bindGroupDetailHeader(g);
+    }
+
+    // ---------- Tab context menu (add to group / move) ----------
+
+    /** Bare long-press on a tab card: group actions + the Space move dialog. */
+    private void showTabContextMenu(final Tab t) {
+        if (t == null) return;
+        if (t.incognito) {
+            toast(R.string.spaces_no_incognito);
+            return;
+        }
+        final java.util.List<CharSequence> items = new java.util.ArrayList<>();
+        final java.util.List<Integer> actions = new java.util.ArrayList<>();
+        if (t.groupId != null) {
+            items.add(getString(R.string.menu_remove_from_group));
+            actions.add(0);
+        }
+        items.add(getString(R.string.menu_add_to_group));
+        actions.add(1);
+        items.add(getString(R.string.spaces_move_title));
+        actions.add(2);
+        new AlertDialog.Builder(this)
+                .setTitle(t.title == null || t.title.isEmpty() ? t.url : t.title)
+                .setItems(items.toArray(new CharSequence[0]), (dlg, which) -> {
+                    int a = which < actions.size() ? actions.get(which) : -1;
+                    if (a == 0) ungroup(t);
+                    else if (a == 1) showAddToGroupPicker(t);
+                    else showMoveTabDialog(t);
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    /** "Add to group": every group of the tab's space, or a new one. */
+    private void showAddToGroupPicker(final Tab t) {
+        java.util.List<TabGroups.Group> gs = tabGroups.forSpace(t.spaceId);
+        java.util.List<CharSequence> names = new java.util.ArrayList<>();
+        final java.util.List<TabGroups.Group> targets = new java.util.ArrayList<>();
+        for (TabGroups.Group g : gs) {
+            names.add(g.name);
+            targets.add(g);
+        }
+        names.add(getString(R.string.menu_new_group));
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.menu_add_to_group)
+                .setItems(names.toArray(new CharSequence[0]), (dlg, which) -> {
+                    if (which < targets.size()) {
+                        assignToGroup(t, targets.get(which));
+                    } else {
+                        showCreateGroupDialog(t.spaceId,
+                                java.util.Collections.singletonList(t));
+                    }
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * Group creation dialog: editable title + the eight-colour palette. Used
+     * by "Add to group → New group…" and by the group menu flows.
+     */
+    private void showCreateGroupDialog(final String spaceId,
+                                       final java.util.List<Tab> members) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (22 * getResources().getDisplayMetrics().density);
+        box.setPadding(pad, pad / 2, pad, 0);
+        final EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint(R.string.group_name_hint);
+        input.setText(R.string.group_new_name);
+        input.selectAll();
+        box.addView(input);
+        box.addView(buildSwatchRow(0, which -> { }));
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.group_create_title)
+                .setView(box)
+                .setPositiveButton(android.R.string.ok, (d, w) -> {
+                    TabGroups.Group g = tabGroups.create(spaceId,
+                            input.getText().toString(),
+                            swatchSelection(box));
+                    if (g == null) return;
+                    for (Tab t : members) {
+                        if (GroupOps.mayJoin(t, g)) t.groupId = g.id;
+                    }
+                    persistGroups();
+                    refreshGroupUi();
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    /** Reads the selected palette index back from the swatch row. */
+    private static int swatchSelection(LinearLayout row) {
+        for (int i = 0; i < row.getChildCount(); i++) {
+            View v = row.getChildAt(i);
+            Object tag = v.getTag();
+            if (tag instanceof int[] && ((int[]) tag).length == 2) {
+                int[] s = (int[]) tag;
+                if (s[1] == 1) return s[0];
+            }
+        }
+        return 0;
+    }
+
+    /** Eight circular colour swatches; the selection carries a ring. */
+    private LinearLayout buildSwatchRow(int selected,
+                                        java.util.function.IntConsumer onPick) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER);
+        int pad = (int) (10 * getResources().getDisplayMetrics().density);
+        row.setPadding(0, pad, 0, 0);
+        float d = getResources().getDisplayMetrics().density;
+        int sel = Math.max(0, Math.min(selected, TabsAdapter.GROUP_COLORS.length - 1));
+        for (int i = 0; i < TabsAdapter.GROUP_COLORS.length; i++) {
+            final int index = i;
+            View sw = new View(this);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    (int) (34 * d), (int) (34 * d));
+            lp.setMargins((int) (7 * d), 0, (int) (7 * d), 0);
+            sw.setLayoutParams(lp);
+            sw.setTag(new int[]{index, index == sel ? 1 : 0});
+            sw.setOnClickListener(v -> {
+                for (int j = 0; j < row.getChildCount(); j++) {
+                    View sib = row.getChildAt(j);
+                    Object t = sib.getTag();
+                    if (t instanceof int[] && ((int[]) t).length == 2) {
+                        ((int[]) t)[1] = j == index ? 1 : 0;
+                        styleSwatch(sib, ((int[]) t)[0], j == index);
+                    }
+                }
+                onPick.accept(index);
+            });
+            styleSwatch(sw, index, index == sel);
+            row.addView(sw);
+        }
+        return row;
+    }
+
+    private void styleSwatch(View v, int index, boolean selected) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(groupColor(this, index));
+        if (selected) {
+            android.util.TypedValue tv = new android.util.TypedValue();
+            getTheme().resolveAttribute(android.R.attr.textColorPrimary, tv, true);
+            bg.setStroke((int) (3 * getResources().getDisplayMetrics().density), tv.data);
+        }
+        v.setBackground(bg);
+    }
+
+    /** Resolves a palette index against the group colour resources. */
+    private static int groupColor(Context ctx, int paletteIndex) {
+        int[] palette = TabsAdapter.GROUP_COLORS;
+        int idx = Math.max(0, Math.min(paletteIndex, palette.length - 1));
+        return ContextCompat.getColor(ctx, palette[idx]);
+    }
+
+    private void assignToGroup(Tab t, TabGroups.Group g) {
+        if (!GroupOps.mayJoin(t, g) || g.id.equals(t.groupId)) return;
+        t.groupId = g.id;
+        pruneEmptyGroups(t.spaceId, g.id);
+        persistGroups();
+        refreshGroupUi();
     }
 
     /** Starts a new group holding exactly the two given same-space tabs. */
     private void createGroupWith(Tab a, Tab b) {
-        if (a == null || b == null || !a.spaceId.equals(b.spaceId)) return;
+        if (!GroupOps.mayPair(a, b)) return;
         TabGroups.Group g = tabGroups.create(a.spaceId,
                 getString(R.string.group_new_name), tabGroups.nextColor());
         if (g == null) return;
         a.groupId = g.id;
         b.groupId = g.id;
         persistGroups();
-        tabsAdapter.notifyDataSetChanged();
+        refreshGroupUi();
     }
 
     private void ungroup(Tab t) {
-        if (t == null || t.groupId == null) return;
+        if (t == null || t.incognito || t.groupId == null) return;
+        String spaceId = t.spaceId;
         t.groupId = null;
-        pruneEmptyGroups(t.spaceId, null);
+        pruneEmptyGroups(spaceId, null);
         persistGroups();
-        tabsAdapter.notifyDataSetChanged();
+        refreshGroupUi();
     }
 
     /** Deletes groups of the space that no longer have any member tabs.
      *  {@code keep} protects the group that just received a tab. */
     private void pruneEmptyGroups(String spaceId, String keep) {
-        for (TabGroups.Group g : tabGroups.forSpace(spaceId)) {
-            if (g.id.equals(keep)) continue;
-            boolean hasMember = false;
-            for (Tab t : tabs.tabs()) {
-                if (!t.incognito && g.id.equals(t.groupId)) {
-                    hasMember = true;
-                    break;
-                }
-            }
-            if (!hasMember) tabGroups.remove(g.id);
+        for (String id : GroupOps.pruneCandidates(tabs.tabs(),
+                tabGroups.forSpace(spaceId), keep)) {
+            tabGroups.remove(id);
+            if (detailGroup != null && detailGroup.id.equals(id)) closeGroupDetail();
         }
     }
 
-    /** Header long-press: rename, colour, ungroup all. */
+    /** Group-card overflow: rename, colour, ungroup all, delete group. */
     private void showGroupMenu(final TabGroups.Group g) {
         new AlertDialog.Builder(this)
                 .setTitle(g.name)
                 .setItems(new CharSequence[]{
                                 getString(R.string.group_rename),
                                 getString(R.string.group_colour),
-                                getString(R.string.group_ungroup_all)},
+                                getString(R.string.group_ungroup_all),
+                                getString(R.string.group_delete_group)},
                         (dlg, which) -> {
                             if (which == 0) promptRenameGroup(g);
                             else if (which == 1) promptGroupColor(g);
-                            else ungroupAll(g);
+                            else if (which == 2) ungroupAll(g);
+                            else confirmDeleteGroup(g);
                         })
                 .setNegativeButton(R.string.cancel, null)
                 .show();
+    }
+
+    private void confirmDeleteGroup(final TabGroups.Group g) {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.group_delete_group)
+                .setMessage(R.string.group_delete_confirm)
+                .setPositiveButton(android.R.string.ok, (d, w) -> deleteGroup(g))
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    /** Delete group: closes every member tab, then removes the group. */
+    private void deleteGroup(TabGroups.Group g) {
+        java.util.List<Tab> doomed = new java.util.ArrayList<>();
+        for (Tab t : tabs.tabs()) {
+            if (!t.incognito && g.id.equals(t.groupId)) doomed.add(t);
+        }
+        if (detailGroup != null && detailGroup.id.equals(g.id)) closeGroupDetail();
+        for (Tab t : doomed) closeTab(t);
+        tabGroups.remove(g.id);
+        persistGroups();
+        refreshGroupUi();
+        toast(R.string.group_removed);
     }
 
     private void promptRenameGroup(final TabGroups.Group g) {
@@ -3425,23 +3731,30 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
                 .setPositiveButton(android.R.string.ok, (d, w) -> {
                     if (tabGroups.rename(g.id, input.getText().toString())) {
                         persistGroups();
-                        tabsAdapter.notifyDataSetChanged();
+                        refreshGroupUi();
                     }
                 })
                 .setNegativeButton(R.string.cancel, null)
                 .show();
     }
 
+    /** Group colour picker with the eight-colour swatch palette. */
     private void promptGroupColor(final TabGroups.Group g) {
-        String[] names = getResources().getStringArray(R.array.group_colors);
-        new AlertDialog.Builder(this)
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (22 * getResources().getDisplayMetrics().density);
+        box.setPadding(pad, pad / 2, pad, 0);
+        final AlertDialog[] holder = new AlertDialog[1];
+        box.addView(buildSwatchRow(g.color, which -> {
+            if (tabGroups.setColor(g.id, which)) {
+                persistGroups();
+                refreshGroupUi();
+                if (holder[0] != null) holder[0].dismiss();
+            }
+        }));
+        holder[0] = new AlertDialog.Builder(this)
                 .setTitle(R.string.group_colour)
-                .setSingleChoiceItems(names, g.color, (d, which) -> {
-                    tabGroups.setColor(g.id, which);
-                    persistGroups();
-                    tabsAdapter.notifyDataSetChanged();
-                    d.dismiss();
-                })
+                .setView(box)
                 .setNegativeButton(R.string.cancel, null)
                 .show();
     }
@@ -3452,7 +3765,7 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         }
         tabGroups.remove(g.id);
         persistGroups();
-        tabsAdapter.notifyDataSetChanged();
+        refreshGroupUi();
         toast(R.string.group_removed);
     }
 
@@ -3467,7 +3780,8 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
             return;
         }
         if (tabSwitcher.getVisibility() == View.VISIBLE) {
-            hideTabSwitcher();
+            if (detailGroup != null) closeGroupDetail(); // back closes the detail first
+            else hideTabSwitcher();
             return;
         }
         Tab t = tabs.currentTab();

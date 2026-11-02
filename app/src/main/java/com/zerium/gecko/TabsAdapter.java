@@ -1,11 +1,13 @@
 package com.zerium.gecko;
 
-import android.graphics.Typeface;
+import android.graphics.Bitmap;
 import android.graphics.drawable.GradientDrawable;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageButton;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -18,26 +20,41 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Grid adapter for the tab switcher (live preview cards).
+ * Grid adapter for the redesigned, Chrome-style tab switcher (live preview
+ * cards).
  *
- * <p>Within the active space the cards are organized into Chrome-style tab
- * groups: each group renders a coloured header row (name, live tab count,
- * collapse chevron) followed by its member cards, then an "Ungrouped"
- * section header (only when groups exist) and the remaining cards. Private
- * tabs stay plain. Grouping itself is drag-and-drop driven by the host
- * activity; this adapter only presents the structure and exposes a
- * {@link DragStarter} hook for the card long-press.</p>
+ * <p><b>Main overview (grouped-card model).</b> Instead of the old flat
+ * layout — a full-width header row per group followed by its member cards —
+ * every group renders as <em>one compact group card</em>: a colour strip, a
+ * name/count chip row and up to four member page-preview tiles. Ungrouped
+ * tabs and private tabs sit directly in the grid as regular cards, so the
+ * "Ungrouped" section header is gone. Tapping a group card opens the
+ * dedicated group-detail grid; long-pressing it opens the group overflow
+ * menu. Group cards are drag/drop targets: dropping a tab on one joins the
+ * group, dropping a grouped tab on empty grid space ungroups it.</p>
+ *
+ * <p><b>Group detail.</b> The same adapter class also serves the dedicated
+ * detail surface via {@link #setDetailGroupId(String)}: it then lists exactly
+ * the members of one group (session order), where "Add tab" creates a tab
+ * that joins the group, dragging a member onto empty space ungroups it, and
+ * every card keeps its normal open/close/long-press actions.</p>
+ *
+ * <p>Rows are decided by {@link GroupRowPlanner} (pure JVM, unit-tested);
+ * grouping rules live in {@link GroupOps}. Grouping is metadata only — this
+ * adapter never touches GeckoSessions, it only re-renders {@link Tab#groupId}.
+ * While the search filter is active the overview flattens to matching cards
+ * so no match can hide behind a group card.</p>
  */
 public class TabsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     public interface Listener {
         void onOpen(Tab tab);
         void onClose(Tab tab);
-        /** Long-press on a card that did not turn into a drag: move to another Space. */
-        void onLongPress(Tab tab);
-        /** Tap on a group header: expand / collapse. */
-        void onGroupToggle(TabGroups.Group group);
-        /** Long-press on a group header: rename / colour / ungroup-all menu. */
+        /** Bare long-press on a card (no drag): add-to-group / remove / move. */
+        void onTabMenu(Tab tab);
+        /** Tap on a group card: open the dedicated group-detail grid. */
+        void onOpenGroup(TabGroups.Group group);
+        /** Long-press on a group card: rename / colour / ungroup / delete. */
         void onGroupMenu(TabGroups.Group group);
     }
 
@@ -47,10 +64,7 @@ public class TabsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     }
 
     static final int TYPE_TAB = 0;
-    static final int TYPE_HEADER = 1;
-
-    /** Tag set on the "Ungrouped" section header (drop target = ungroup). */
-    public static final Object TAG_UNGROUPED = new Object();
+    static final int TYPE_GROUP = 1;
 
     /** Palette indices into R.color.group_*; order matches the colour picker. */
     public static final int[] GROUP_COLORS = {
@@ -59,6 +73,9 @@ public class TabsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             R.color.group_pink, R.color.group_purple
     };
 
+    /** Group cards show at most this many member preview tiles. */
+    private static final int MAX_TILES = 4;
+
     private final List<Tab> tabs;
     private final TabManager manager;
     private final TabGroups tabGroups;
@@ -66,9 +83,8 @@ public class TabsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private DragStarter dragStarter;
     private String query = "";
     private String activeSpaceId = Spaces.DEFAULT_ID;
-
-    /** Flat presentation: Tab or TabGroups.Group entries (rebuilt lazily). */
-    private final List<Object> rows = new ArrayList<>();
+    /** Non-null when this instance drives the group-detail grid. */
+    private String detailGroupId;
 
     public TabsAdapter(List<Tab> tabs, TabManager manager, TabGroups tabGroups,
                        Listener listener) {
@@ -94,120 +110,107 @@ public class TabsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         notifyDataSetChanged();
     }
 
-    private boolean matches(Tab t) {
-        if (query.isEmpty()) return true;
-        String title = t.title == null ? "" : t.title.toLowerCase();
-        String url = t.url == null ? "" : t.url.toLowerCase();
-        return title.contains(query) || url.contains(query);
+    /** Puts this instance into (or out of) group-detail mode. */
+    public void setDetailGroupId(String groupId) {
+        detailGroupId = groupId;
+        notifyDataSetChanged();
     }
 
-    /** Rebuilds the flat row list: per group [header + members], then the
-     *  ungrouped section header (only when groups exist), ungrouped tabs,
-     *  and finally private tabs. While the search filter is active every
-     *  group is rendered expanded so matches stay visible. */
-    private void buildRows() {
-        rows.clear();
-        List<TabGroups.Group> groups = tabGroups.forSpace(activeSpaceId);
-        List<List<Tab>> members = new ArrayList<>();
-        for (int i = 0; i < groups.size(); i++) members.add(new ArrayList<Tab>());
-        List<Tab> ungrouped = new ArrayList<>();
-        List<Tab> priv = new ArrayList<>();
-        for (Tab t : tabs) {
-            if (t.incognito) {
-                priv.add(t);
-                continue;
-            }
-            if (!activeSpaceId.equals(t.spaceId)) continue;
-            TabGroups.Group g = t.groupId == null ? null : tabGroups.get(t.groupId);
-            if (g != null && g.spaceId.equals(activeSpaceId)) {
-                int gi = groups.indexOf(g);
-                if (gi >= 0 && matches(t)) members.get(gi).add(t);
-            } else if (matches(t)) {
-                ungrouped.add(t);
-            }
+    private List<GroupRowPlanner.Row> buildRows() {
+        if (detailGroupId != null) {
+            return GroupRowPlanner.planDetail(tabs, tabGroups,
+                    tabGroups.get(detailGroupId));
         }
-        boolean searching = !query.isEmpty();
-        for (int i = 0; i < groups.size(); i++) {
-            List<Tab> mem = members.get(i);
-            TabGroups.Group g = groups.get(i);
-            if (searching && mem.isEmpty()) continue;
-            rows.add(g);
-            if (searching || !g.collapsed) rows.addAll(mem);
-        }
-        if (!searching && !groups.isEmpty() && !ungrouped.isEmpty()) {
-            rows.add(TAG_UNGROUPED);
-        }
-        rows.addAll(ungrouped);
-        rows.addAll(priv);
-    }
-
-    private Object rowAt(int position) {
-        if (position < 0 || position >= rows.size()) return null;
-        return rows.get(position);
+        return GroupRowPlanner.planMain(tabs, tabGroups, activeSpaceId, query);
     }
 
     @Override
     public int getItemViewType(int position) {
-        buildRows();
-        Object o = rowAt(position);
-        return (o instanceof TabGroups.Group || o == TAG_UNGROUPED)
-                ? TYPE_HEADER : TYPE_TAB;
+        GroupRowPlanner.Row r = positionAt(position);
+        return r != null && r.isGroup() ? TYPE_GROUP : TYPE_TAB;
+    }
+
+    private GroupRowPlanner.Row positionAt(int position) {
+        List<GroupRowPlanner.Row> rows = buildRows();
+        if (position < 0 || position >= rows.size()) return null;
+        return rows.get(position);
     }
 
     @NonNull
     @Override
     public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         LayoutInflater inf = LayoutInflater.from(parent.getContext());
-        if (viewType == TYPE_HEADER) {
-            return new HeaderVH(inf.inflate(R.layout.item_tab_group_header, parent, false));
+        if (viewType == TYPE_GROUP) {
+            return new GroupVH(inf.inflate(R.layout.item_tab_group, parent, false));
         }
         return new TabVH(inf.inflate(R.layout.item_tab, parent, false));
     }
 
     @Override
     public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
-        buildRows();
-        Object o = rowAt(position);
-        if (holder instanceof HeaderVH) {
-            bindHeader((HeaderVH) holder, o instanceof TabGroups.Group ? (TabGroups.Group) o : null);
-        } else if (o instanceof Tab) {
-            bindTab((TabVH) holder, (Tab) o);
+        GroupRowPlanner.Row row = positionAt(position);
+        if (row == null) return;
+        if (holder instanceof GroupVH && row.isGroup()) {
+            bindGroup((GroupVH) holder, row.group);
+        } else if (holder instanceof TabVH && !row.isGroup()) {
+            bindTab((TabVH) holder, row.tab);
         }
     }
 
-    private void bindHeader(HeaderVH h, final TabGroups.Group g) {
-        h.itemView.setTag(g == null ? TAG_UNGROUPED : g);
-        if (g == null) {
-            h.name.setText(R.string.tab_groups_ungrouped);
-            h.name.setTypeface(Typeface.DEFAULT_BOLD);
-            h.dot.setVisibility(View.GONE);
-            h.count.setText(R.string.tab_groups_ungrouped_hint);
-            h.count.setVisibility(View.VISIBLE);
-            h.chevron.setVisibility(View.GONE);
-            h.itemView.setOnClickListener(null);
-            h.itemView.setClickable(false);
-            h.itemView.setOnLongClickListener(null);
-            h.itemView.setLongClickable(false);
-            return;
-        }
+    private void bindGroup(final GroupVH h, final TabGroups.Group g) {
+        h.itemView.setTag(g);
+        int color = colorOf(h.itemView, g.color);
+        h.strip.setBackgroundColor(color);
+        GradientDrawable dot = new GradientDrawable();
+        dot.setShape(GradientDrawable.OVAL);
+        dot.setColor(color);
+        h.dot.setBackground(dot);
         h.name.setText(g.name);
-        h.name.setTypeface(Typeface.DEFAULT_BOLD);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(colorOf(h.itemView, g.color));
-        h.dot.setBackground(bg);
-        h.dot.setVisibility(View.VISIBLE);
-        h.count.setText(h.itemView.getContext().getString(
-                R.string.spaces_tab_count, memberCount(g)));
-        h.count.setVisibility(View.VISIBLE);
-        h.chevron.setImageResource(g.collapsed
-                ? R.drawable.ic_chevron_down : R.drawable.ic_chevron_up);
-        h.chevron.setVisibility(View.VISIBLE);
-        h.itemView.setOnClickListener(v -> listener.onGroupToggle(g));
+        int count = GroupRowPlanner.memberCount(tabs, g);
+        h.count.setText(h.itemView.getContext().getString(R.string.spaces_tab_count, count));
+        bindTiles(h.tiles, g);
+        h.itemView.setOnClickListener(v -> listener.onOpenGroup(g));
         h.itemView.setOnLongClickListener(v -> {
             listener.onGroupMenu(g);
             return true;
         });
+    }
+
+    /** Up to {@link #MAX_TILES} member previews; neutral tiles fill the rest. */
+    private void bindTiles(LinearLayout tiles, TabGroups.Group g) {
+        tiles.removeAllViews();
+        List<Tab> members = new ArrayList<>();
+        for (Tab t : tabs) {
+            if (t.incognito || t.groupId == null || !g.id.equals(t.groupId)) continue;
+            members.add(t);
+            if (members.size() == MAX_TILES) break;
+        }
+        if (members.isEmpty()) return; // empty groups are hidden by the planner
+        int pad = (int) (3 * tiles.getResources().getDisplayMetrics().density);
+        for (int i = 0; i < Math.min(MAX_TILES, Math.max(members.size(), 2)); i++) {
+            Tab t = i < members.size() ? members.get(i) : null;
+            tiles.addView(placeholderTile(tiles, pad, t == null ? null : t.preview));
+        }
+    }
+
+    /** One preview tile: the page snapshot, or a neutral placeholder. */
+    private View placeholderTile(LinearLayout parent, int pad, Bitmap preview) {
+        ImageView iv = new ImageView(parent.getContext());
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+        lp.setMargins(pad, pad, pad, 0);
+        iv.setLayoutParams(lp);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(10 * parent.getResources().getDisplayMetrics().density);
+        android.util.TypedValue tv = new android.util.TypedValue();
+        parent.getContext().getTheme().resolveAttribute(
+                android.R.attr.colorBackground, tv, true);
+        bg.setColor(tv.data);
+        iv.setBackground(bg);
+        iv.setClipToOutline(true);
+        iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        if (preview != null && !preview.isRecycled()) iv.setImageBitmap(preview);
+        return iv;
     }
 
     private void bindTab(TabVH h, final Tab t) {
@@ -224,13 +227,19 @@ public class TabsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         h.card.setStrokeWidth(current ? 3 : 0);
         h.card.setStrokeColor(ContextCompat.getColor(h.itemView.getContext(),
                 R.color.primary));
+        // Chrome-style colour coding: member cards carry their group colour.
         TabGroups.Group g = t.groupId == null ? null : tabGroups.get(t.groupId);
-        if (g != null && g.spaceId.equals(activeSpaceId)) {
-            GradientDrawable bg = new GradientDrawable();
-            bg.setShape(GradientDrawable.OVAL);
-            bg.setColor(colorOf(h.itemView, g.color));
-            h.dot.setBackground(bg);
+        boolean grouped = g != null && g.spaceId.equals(activeSpaceId);
+        if (grouped) {
+            GradientDrawable dot = new GradientDrawable();
+            dot.setShape(GradientDrawable.OVAL);
+            dot.setColor(colorOf(h.itemView, g.color));
+            h.dot.setBackground(dot);
             h.dot.setVisibility(View.VISIBLE);
+            if (!current) {
+                h.card.setStrokeWidth(2);
+                h.card.setStrokeColor(colorOf(h.itemView, g.color));
+            }
         } else {
             h.dot.setVisibility(View.GONE);
         }
@@ -239,7 +248,7 @@ public class TabsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         h.itemView.setOnLongClickListener(v -> {
             if (t.incognito) return true;
             if (dragStarter != null) dragStarter.startDrag(h);
-            else listener.onLongPress(t);
+            else listener.onTabMenu(t);
             return true;
         });
     }
@@ -248,16 +257,6 @@ public class TabsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         int[] palette = GROUP_COLORS;
         int idx = Math.max(0, Math.min(paletteIndex, palette.length - 1));
         return ContextCompat.getColor(v.getContext(), palette[idx]);
-    }
-
-    /** Live member count of a group (tabs currently in memory). */
-    private int memberCount(TabGroups.Group g) {
-        int n = 0;
-        for (Tab t : tabs) {
-            if (t.incognito || t.groupId == null) continue;
-            if (g.id.equals(t.groupId)) n++;
-        }
-        return n;
     }
 
     private static String displayHost(Tab t) {
@@ -271,15 +270,14 @@ public class TabsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     @Override
     public int getItemCount() {
-        buildRows();
-        return rows.size();
+        return buildRows().size();
     }
 
     static class TabVH extends RecyclerView.ViewHolder {
         final MaterialCardView card;
         final ImageView preview;
         final TextView title, url, incognito;
-        final TextView close;
+        final ImageButton close;
         final View dot;
 
         TabVH(@NonNull View v) {
@@ -294,19 +292,21 @@ public class TabsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         }
     }
 
-    static class HeaderVH extends RecyclerView.ViewHolder {
+    static class GroupVH extends RecyclerView.ViewHolder {
+        final View strip;
         final View dot;
         final TextView name;
         final TextView count;
-        final ImageView chevron;
+        final LinearLayout tiles;
 
-        HeaderVH(@NonNull View v) {
+        GroupVH(@NonNull View v) {
             super(v);
             v.setTag(null);
+            strip = v.findViewById(R.id.groupStrip);
             dot = v.findViewById(R.id.grpDot);
             name = v.findViewById(R.id.grpName);
             count = v.findViewById(R.id.grpCount);
-            chevron = v.findViewById(R.id.grpChevron);
+            tiles = v.findViewById(R.id.groupTiles);
         }
     }
 }

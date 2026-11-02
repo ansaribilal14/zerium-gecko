@@ -1,12 +1,16 @@
 # Roadmap
 
+## v1.8 (shipped)
+
+- Chrome-style tab-group UI redesign (mirrors Zerium Browser 1.14.0): the overview renders one compact group card per group (colour strip, name/count chip, member preview tiles) instead of flat header rows, and every tap opens a dedicated group-detail grid — colour-coded header with overflow (rename, eight-colour swatch palette, ungroup all, delete group), the member grid, and "New tab in group" that joins the group and the current Space. A bare long-press on a tab card opens an add-to-group / remove-from-group / move-to-Space context menu; grouping and ungrouping are drag-and-drop (drop on tab/group card, drag out to empty space); the tab search flattens to matching cards while active. Still pure metadata on `Tab.groupId` — no GeckoSession is ever recreated, Spaces untouched. Also fixed: the tab-card view holder's close-button type mismatch (crash risk on bind). Spec updated: `docs/issues/tab-groups-inside-spaces.md`.
+
 ## v1.7 (shipped)
 
 - Two-menu split mirroring Zerium Browser 1.13.0: the bottom task bar's menu is a compact quick-actions sheet (tabs, spaces, destinations, common toggles); the top menu keeps the full list (quick-nav row, page tools, add-ons, app entries).
 
 ## v1.6 (shipped)
 
-- Tab groups inside Spaces: Chrome-style drag-and-drop grouping within the active space as pure metadata (`Tab.groupId`) — moving tabs never recreates the GeckoSession, its history or the space's engine profile. Colored collapsible group headers, persistence per space and across the per-space tab archive. Spec: `docs/issues/tab-groups-inside-spaces.md`.
+- Tab groups inside Spaces: Chrome-style drag-and-drop grouping within the active space as pure metadata (`Tab.groupId`) — moving tabs never recreates the GeckoSession, its history or the space's engine profile. Colored collapsible group headers, persistence per space and across the per-space tab archive. Spec: `docs/issues/tab-groups-inside-spaces.md` (redesigned to grouped cards + detail grid in v1.8).
 - Android browser integration: exported browser activity with `ACTION_VIEW` + `category.BROWSABLE` http/https intent filters; Settings → Links with a `RoleManager.ROLE_BROWSER` default-browser request (Android 10+) and "External links open in" (default space / current space / ask every time); links bound for another isolated space are parked across the space-switch restart — isolation is never silently crossed. Spec: `docs/issues/android-browser-integration.md`.
 
 ## v1.2 (shipped)
