@@ -9,6 +9,22 @@ All notable changes to Zerium G are documented in this file (Keep a Changelog fo
 - Spaces follow-ups: per-space colored identities, per-space add-on presets documented at creation time.
 - Anti-adblock bypass port of Zerium Browser's engine (extension content-script + background webRequest), including the v1.13.0 hardening: bounded-descent wall discovery, ancestor walking from un-randomizable widget artifacts, structural-evidence floor, tamper-lowered removal bar.
 
+## [1.9.0] — 2026-11-03
+
+Address-bar correctness, native omnibox suggestions and a Chrome-style Normal/Private tab switcher. Gecko's native private sessions stay as they are — verified, not replaced.
+
+### Fixed
+- **`about:blank` never poses as a website URL.** Internal pages (`about:*`, `data:*`, `javascript:*`) show an empty address field with the start-page hint; only real HTTP/HTTPS URLs reach the omnibox. Engine error pages (rendered as `data:` URIs by `onLoadError`) no longer replace the displayed URL — the failed address stays visible, and the `data:` blob never enters history or the omnibox.
+- **The omnibox never overwrites what you are typing.** Page updates — redirects, back/forward, title changes — no longer clobber focused user text; tab switches close omnibox editing first.
+
+### Added
+- **Native omnibox suggestions.** Focusing the address field shows the current page (title + URL); typing shows local history suggestions (page title + URL, parameterized and deduplicated SQLite queries), a direct-URL row and a search row for the selected engine. **Remote search suggestions** (DuckDuckGo, Startpage, Brave, Google, Bing, Wikipedia endpoints; custom engines fall back to local) are opt-in via the new **Search Suggestions** setting, whose description states that typed text is sent to the provider. Requests are debounced ~250 ms, stale responses cancelled by a generation counter, results capped at 8, and offline/stale failures silently keep the local rows. Nothing of this runs in a private tab.
+- **Chrome-style Normal / Private tab switcher.** The switcher header is now a two-mode selector with live counts. Normal mode shows only the active Space's regular tabs and existing tab groups (Space chip bar unchanged); Private mode shows only private tabs, hides the Space chips and never shows groups. The New Tab button creates a tab in the selected mode, Close All respects it, and opening the switcher lands in the mode of the active tab. Switching modes never touches any session — every GeckoView and its native private-mode state stay alive.
+
+### Changed
+- The standalone "New private tab" switcher button is replaced by the mode selector.
+- Private-mode implementation is deliberately unchanged: `usePrivateMode(true)` is still set on the `GeckoSessionSettings` before `session.open(runtime)`, so session lifecycle, in-memory-only storage, history exclusion (verified per-navigation), no tab previews and per-add-on private-mode permissions remain Gecko's own — no custom cookie workaround was introduced.
+
 ## [1.8.0] — 2026-11-02
 
 Complete Chrome-style redesign of the tab-group UI (grouped-card overview + dedicated group-detail grid), mirroring Zerium Browser 1.14.0.

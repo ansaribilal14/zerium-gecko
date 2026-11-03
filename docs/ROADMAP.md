@@ -1,5 +1,9 @@
 # Roadmap
 
+## v1.9 (shipped)
+
+- Address bar & private browsing rehaul (mirrors Zerium Browser 1.15.0): `about:blank`/internal pages and engine `data:` error pages can no longer pose as website URLs and never enter history; the focused omnibox is never overwritten by page updates. Native omnibox suggestions (current page, local history title+URL, direct-URL and search rows; opt-in remote suggestions per engine incl. Google with 250 ms debounce, stale-request cancellation, 8-row cap, offline fallback, disclosure setting; none of it in private tabs). Chrome-style Normal/Private two-mode tab switcher with live counts, mode-aware New Tab / Close All, Space chips hidden in the private pane. Gecko's native private mode (`usePrivateMode` before `session.open`) is deliberately unchanged — verified for lifecycle, data cleanup, history exclusion and add-on private-mode permissions.
+
 ## v1.8 (shipped)
 
 - Chrome-style tab-group UI redesign (mirrors Zerium Browser 1.14.0): the overview renders one compact group card per group (colour strip, name/count chip, member preview tiles) instead of flat header rows, and every tap opens a dedicated group-detail grid — colour-coded header with overflow (rename, eight-colour swatch palette, ungroup all, delete group), the member grid, and "New tab in group" that joins the group and the current Space. A bare long-press on a tab card opens an add-to-group / remove-from-group / move-to-Space context menu; grouping and ungrouping are drag-and-drop (drop on tab/group card, drag out to empty space); the tab search flattens to matching cards while active. Still pure metadata on `Tab.groupId` — no GeckoSession is ever recreated, Spaces untouched. Also fixed: the tab-card view holder's close-button type mismatch (crash risk on bind). Spec updated: `docs/issues/tab-groups-inside-spaces.md`.

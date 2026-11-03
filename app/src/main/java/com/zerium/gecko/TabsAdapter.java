@@ -85,6 +85,8 @@ public class TabsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private String activeSpaceId = Spaces.DEFAULT_ID;
     /** Non-null when this instance drives the group-detail grid. */
     private String detailGroupId;
+    /** True while the switcher shows the private pane (incognito tabs only). */
+    private boolean privateMode;
 
     public TabsAdapter(List<Tab> tabs, TabManager manager, TabGroups tabGroups,
                        Listener listener) {
@@ -116,10 +118,23 @@ public class TabsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         notifyDataSetChanged();
     }
 
+    /** Switches the overview between normal (space tabs + groups) and private. */
+    public void setPrivateMode(boolean privateMode) {
+        this.privateMode = privateMode;
+        notifyDataSetChanged();
+    }
+
+    public boolean isPrivateMode() {
+        return privateMode;
+    }
+
     private List<GroupRowPlanner.Row> buildRows() {
-        if (detailGroupId != null) {
+        if (detailGroupId != null && !privateMode) {
             return GroupRowPlanner.planDetail(tabs, tabGroups,
                     tabGroups.get(detailGroupId));
+        }
+        if (privateMode) {
+            return GroupRowPlanner.planPrivate(tabs, query);
         }
         return GroupRowPlanner.planMain(tabs, tabGroups, activeSpaceId, query);
     }

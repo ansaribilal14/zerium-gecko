@@ -49,6 +49,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.ItemTouchHelper;
+import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.json.JSONArray;
@@ -147,6 +148,19 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
     private TabGroups.Group detailGroup;
     private ItemTouchHelper groupDragHelper;
     private View newTabFab;
+    // Chrome-style Normal/Incognito switcher mode selector
+    private TextView modeNormalChip, modePrivateChip;
+    private View spaceChipsBar;
+    private boolean switcherPrivate;
+    // Native omnibox suggestions (local history + optional remote)
+    private LinearLayout suggestPanel;
+    private RecyclerView suggestList;
+    private OmniboxSuggestAdapter suggestAdapter;
+    private final android.os.Handler suggestHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private Runnable suggestPending;
+    private final java.util.concurrent.atomic.AtomicLong suggestGen =
+            new java.util.concurrent.atomic.AtomicLong(0);
 
     // Long-press drag state (tab grouping inside the active space)
     private Tab draggedTab;
@@ -326,9 +340,25 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         omnibox.setOnFocusChangeListener((v, hasFocus) -> {
             if (hasFocus) {
                 omnibox.post(() -> omnibox.selectAll());
+                showSuggestPanel();
+                refreshSuggestions(omnibox.getText().toString());
             } else {
+                hideSuggestPanel();
                 updateChrome(tabs.currentTab());
                 hideKeyboard();
+            }
+        });
+        // Debounced native suggestions while typing. Page updates never
+        // overwrite focused text (see updateChrome), and this watcher only
+        // reacts while the omnibox actually has focus.
+        omnibox.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void afterTextChanged(android.text.Editable s) {
+                if (!omnibox.hasFocus()) return;
+                if (suggestPending != null) suggestHandler.removeCallbacks(suggestPending);
+                suggestPending = () -> refreshSuggestions(s.toString());
+                suggestHandler.postDelayed(suggestPending, 250);
             }
         });
 
@@ -420,17 +450,28 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
             if (detailGroup != null) openTabInGroup(detailGroup);
         });
 
+        // Chrome-style two-mode selector replaces the standalone incognito
+        // button: Normal shows the active space's tabs and groups, Private
+        // shows only private tabs. Close All follows the selected mode.
+        spaceChipsBar = findViewById(R.id.spaceChipsBar);
+        modeNormalChip = findViewById(R.id.modeNormalChip);
+        modePrivateChip = findViewById(R.id.modePrivateChip);
+        modeNormalChip.setOnClickListener(v -> setSwitcherPrivate(false));
+        modePrivateChip.setOnClickListener(v -> setSwitcherPrivate(true));
+
+        suggestPanel = findViewById(R.id.suggestPanel);
+        suggestList = findViewById(R.id.suggestList);
+        suggestList.setLayoutManager(new LinearLayoutManager(this));
+        suggestAdapter = new OmniboxSuggestAdapter(this::onSuggestionPicked);
+        suggestList.setAdapter(suggestAdapter);
+
         findViewById(R.id.btnSwitcherData).setOnClickListener(v -> deleteBrowsingData());
-        findViewById(R.id.btnNewTab).setOnClickListener(v -> {
-            hideTabSwitcher();
-            openTab(null, false);
-        });
-        findViewById(R.id.btnNewIncognito).setOnClickListener(v -> {
-            hideTabSwitcher();
-            openTab(null, true);
-        });
         findViewById(R.id.btnSwitcherClose).setOnClickListener(v -> hideTabSwitcher());
         findViewById(R.id.btnCloseAllTabs).setOnClickListener(v -> closeAllTabs());
+        findViewById(R.id.btnNewTab).setOnClickListener(v -> {
+            hideTabSwitcher();
+            openTab(null, switcherPrivate);
+        });
 
         restoreSession();
         handleIntent(getIntent());
@@ -870,6 +911,12 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         int idx = tabs.tabs().indexOf(tab);
         if (idx < 0) return;
         hideFindBar();
+        // Tab switch closes omnibox editing (Chrome behaviour): the focused
+        // text of the old tab must not bleed into the new tab's chrome.
+        if (omnibox.hasFocus()) {
+            omnibox.clearFocus();
+            hideSuggestPanel();
+        }
         tabs.setCurrent(idx);
         showCurrentWebView();
         updateChrome(tab);
@@ -910,6 +957,10 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
 
     /** Closes the active space's tabs (the switcher's current view scope). */
     private void closeAllTabs() {
+        if (switcherPrivate) {
+            closeAllIncognitoTabs();
+            return;
+        }
         closeActiveSpaceTabsInMemory();
         hideTabSwitcher();
         if (tabs.count() == 0) openTab(null, false);
@@ -919,6 +970,37 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         }
         tabsAdapter.notifyDataSetChanged();
         buildSpaceChips();
+    }
+
+    /** Closes every incognito tab in one step (private-mode "Close All"). */
+    private void closeAllIncognitoTabs() {
+        int removed = 0;
+        int i = 0;
+        while (i < tabs.tabs().size()) {
+            Tab t = tabs.tabs().get(i);
+            if (t.incognito) {
+                webContainer.removeView(t.view);
+                tabs.remove(t);
+                t.destroy();
+                if (extActions != null) extActions.detachSession(t.session);
+                removed++;
+            } else {
+                i++;
+            }
+        }
+        if (removed == 0) {
+            toast(R.string.no_incognito_tabs);
+            return;
+        }
+        if (tabs.count() == 0) {
+            openTab(null, false);
+        } else {
+            showCurrentWebView();
+            updateChrome(tabs.currentTab());
+        }
+        tabsAdapter.notifyDataSetChanged();
+        Toast.makeText(this, getString(R.string.incognito_tabs_closed, removed),
+                Toast.LENGTH_SHORT).show();
     }
 
     /** Destroys the in-memory tabs of the active space. */
@@ -1004,11 +1086,14 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
             public void onLocationChange(@NonNull GeckoSession s, String url,
                                          List permissions,
                                          Boolean hasUserGesture) {
-                if (url != null && !url.isEmpty()) {
+                if (url != null && !url.isEmpty() && !url.startsWith("data:")) {
+                    // Error pages render as data: URIs (onLoadError); the
+                    // failed URL keeps being displayed instead of a data:
+                    // blob posing as the page address.
                     boolean changed = !url.equals(tab.url);
                     tab.url = url;
                     if (changed) mediaRegistry.clear(tab.id);
-                    if (changed && !tab.incognito && url.startsWith("http")) {
+                    if (changed && !tab.incognito && Urls.isWebUrl(url)) {
                         history.add(url, tab.title);
                     }
                 }
@@ -2222,15 +2307,23 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
     private void updateChrome(Tab tab) {
         if (tab == null) return;
         if (isStartPage(tab)) {
-            omnibox.setText("");
+            if (!omnibox.hasFocus()) { // never clobber user-typed text
+                omnibox.setText("");
+            }
             omnibox.setHint(R.string.search_hint);
             btnSecurity.setImageResource(R.drawable.ic_home);
         } else if (tab.readerActive) {
-            omnibox.setText(getString(R.string.reader_prefix)
-                    + displayUrl(tab.readerSourceUrl == null ? tab.url : tab.readerSourceUrl));
+            if (!omnibox.hasFocus()) {
+                omnibox.setText(getString(R.string.reader_prefix)
+                        + displayUrl(tab.readerSourceUrl == null ? tab.url : tab.readerSourceUrl));
+            }
             btnSecurity.setImageResource(R.drawable.ic_lock);
         } else {
-            omnibox.setText(displayUrl(tab.url));
+            // Redirects, history moves and title changes all funnel here;
+            // the focused user text is never overwritten (Chrome behaviour).
+            if (!omnibox.hasFocus()) {
+                omnibox.setText(displayUrl(tab.url));
+            }
             omnibox.setHint(R.string.search_hint);
             btnSecurity.setImageResource(tab.secure ? R.drawable.ic_lock : R.drawable.ic_globe);
         }
@@ -2247,19 +2340,24 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
     }
 
     private static String displayUrl(String url) {
-        if (url == null) return "";
-        return url.replaceFirst("^https?://", "");
+        return Urls.displayUrl(url);
     }
 
     private boolean isStartPage(Tab tab) {
-        return tab.url == null || tab.url.isEmpty() || tab.url.equals(HOME_URL)
-                || tab.url.startsWith("data:");
+        if (tab.url == null || tab.url.isEmpty() || tab.url.equals(HOME_URL)
+                || tab.url.startsWith("data:")) {
+            return true;
+        }
+        // about:blank (and any other about: page) is an internal page, not
+        // a website: empty omnibox, no security dialog, no history, no preview.
+        return tab.url.toLowerCase().startsWith("about:");
     }
 
     private void navigateOmnibox() {
         String text = omnibox.getText().toString().trim();
         if (text.isEmpty()) return;
         hideKeyboard();
+        hideSuggestPanel();
         omnibox.clearFocus();
         Tab t = tabs.currentTab();
         if (t == null) return;
@@ -2768,11 +2866,152 @@ public class MainActivity extends AppCompatActivity implements ExtActionSupport.
         if (current != null && !current.incognito && !isStartPage(current)) capturePreview(current);
         tabSearch.setText("");
         noMatchingTabs.setVisibility(View.GONE);
+        // Opening the switcher lands in the mode of the active tab
+        // (Chrome behaviour): private tab → private pane, otherwise normal.
+        setSwitcherPrivate(current != null && current.incognito);
         buildSpaceChips();
-        tabsAdapter.notifyDataSetChanged();
         tabSwitcher.setVisibility(View.VISIBLE);
         hideKeyboard();
         omnibox.clearFocus();
+    }
+
+    /**
+     * Switches the tab switcher between Normal (active space's regular tabs
+     * + groups; Space chip bar visible) and Private (only private tabs; no
+     * Space chips, no groups — private tabs cannot be grouped). Switching
+     * the mode never touches any session: every GeckoView stays alive and
+     * private sessions keep Gecko's native in-memory state.
+     */
+    private void setSwitcherPrivate(boolean priv) {
+        switcherPrivate = priv;
+        closeGroupDetail();
+        tabsAdapter.setPrivateMode(priv);
+        spaceChipsBar.setVisibility(priv ? View.GONE : View.VISIBLE);
+        updateModeChips();
+        tabsAdapter.notifyDataSetChanged();
+    }
+
+    /** Counts + selected styling of the two selector chips. */
+    private void updateModeChips() {
+        if (modeNormalChip == null || modePrivateChip == null) return;
+        int normal = GroupRowPlanner.normalTabCount(tabs.tabs(), spaces.activeId());
+        int priv = GroupRowPlanner.incognitoTabCount(tabs.tabs());
+        modeNormalChip.setText(getString(R.string.switcher_mode_normal, normal));
+        modePrivateChip.setText(getString(R.string.switcher_mode_private, priv));
+        int sel = ContextCompat.getColor(this, R.color.primary);
+        int unsel = ContextCompat.getColor(this, R.color.on_surface_variant);
+        modeNormalChip.setTextColor(switcherPrivate ? unsel : sel);
+        modePrivateChip.setTextColor(switcherPrivate ? sel : unsel);
+        modeNormalChip.setTypeface(null, switcherPrivate ? android.graphics.Typeface.NORMAL
+                : android.graphics.Typeface.BOLD);
+        modePrivateChip.setTypeface(null, switcherPrivate ? android.graphics.Typeface.BOLD
+                : android.graphics.Typeface.NORMAL);
+    }
+
+    // ---------- Native omnibox suggestions ----------
+
+    private void showSuggestPanel() {
+        if (suggestPanel == null) return;
+        suggestPanel.setVisibility(View.VISIBLE);
+    }
+
+    /** Hides the dropdown and cancels any in-flight remote request. */
+    private void hideSuggestPanel() {
+        if (suggestPanel == null) return;
+        suggestPanel.setVisibility(View.GONE);
+        suggestGen.incrementAndGet();
+        if (suggestPending != null) suggestHandler.removeCallbacks(suggestPending);
+    }
+
+    /**
+     * Rebuilds the dropdown for the current omnibox text: local history and
+     * the current page immediately, remote suggestions asynchronously when
+     * the Search Suggestions setting is enabled. Stale responses are
+     * dropped via the generation counter; offline keeps the local rows.
+     * Incognito (native Gecko private mode): no history lookup and no
+     * remote request — only the current page and the direct action rows.
+     */
+    private void refreshSuggestions(String text) {
+        long gen = suggestGen.incrementAndGet();
+        Tab t = tabs.currentTab();
+        boolean incognito = t != null && t.incognito;
+        java.util.List<String[]> local = new ArrayList<>();
+        if (!incognito) {
+            try {
+                for (HistoryDB.Entry e : history.suggest(text, SuggestEngine.MAX_SUGGESTIONS)) {
+                    local.add(new String[]{e.title, e.url});
+                }
+            } catch (Exception ignored) {}
+        }
+        String curTitle = t == null ? null : t.title;
+        String curUrl = t == null || isStartPage(t) ? null : t.url;
+        String engineName = Utils.engineAt(prefs, prefs.searchEngine()).name;
+        java.util.List<SuggestEngine.Suggestion> rows = SuggestEngine.merge(
+                curTitle, curUrl, text, local, java.util.Collections.emptyList(), engineName);
+        suggestAdapter.submit(rows);
+        suggestList.setVisibility(rows.isEmpty() ? View.GONE : View.VISIBLE);
+        if (incognito || !prefs.searchSuggestions()) return;
+        final Utils.Engine engine = Utils.engineAt(prefs, prefs.searchEngine());
+        final String endpoint = SuggestEngine.remoteUrl(engine, text);
+        if (endpoint == null) return; // custom engines: local only
+        final long sentGen = gen;
+        final java.util.List<String[]> sentLocal = local;
+        final String sentTitle = curTitle;
+        final String sentUrl = curUrl;
+        final String sentText = text;
+        new Thread(() -> {
+            java.util.List<String> remote = SuggestEngine.parseResponse(httpGet(endpoint));
+            runOnUiThread(() -> {
+                if (suggestGen.get() != sentGen || !omnibox.hasFocus()) return;
+                java.util.List<SuggestEngine.Suggestion> merged = SuggestEngine.merge(
+                        sentTitle, sentUrl, sentText, sentLocal, remote, engineName);
+                suggestAdapter.submit(merged);
+                suggestList.setVisibility(merged.isEmpty() ? View.GONE : View.VISIBLE);
+            });
+        }, "zerium-omnibox-suggest").start();
+    }
+
+    /** Blocking GET for suggestion endpoints; null on any failure (offline fallback). */
+    private static String httpGet(String url) {
+        java.net.HttpURLConnection conn = null;
+        try {
+            conn = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+            conn.setConnectTimeout(2500);
+            conn.setReadTimeout(2500);
+            conn.setInstanceFollowRedirects(true);
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) ZeriumSuggest/1");
+            if (conn.getResponseCode() != 200) return null;
+            try (java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(conn.getInputStream(),
+                            java.nio.charset.StandardCharsets.UTF_8))) {
+                StringBuilder sb = new StringBuilder();
+                char[] buf = new char[2048];
+                int n;
+                while ((n = r.read(buf)) > 0 && sb.length() < 65536) sb.append(buf, 0, n);
+                return sb.toString();
+            }
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            if (conn != null) try { conn.disconnect(); } catch (Throwable ignored) {}
+        }
+    }
+
+    /** A dropdown row was tapped: navigate without touching history rules. */
+    private void onSuggestionPicked(SuggestEngine.Suggestion s) {
+        Tab t = tabs.currentTab();
+        hideSuggestPanel();
+        hideKeyboard();
+        omnibox.clearFocus();
+        if (t == null || s == null) return;
+        if (s.type == SuggestEngine.TYPE_CURRENT) {
+            updateChrome(t); // keep the page, just close editing
+            return;
+        }
+        String dest = s.type == SuggestEngine.TYPE_SEARCH
+                ? Utils.smartUrl(s.payload, prefs)
+                : s.payload;
+        if (dest != null && !dest.isEmpty()) loadInTab(t, dest);
     }
 
     /** Live preview via the engine compositor (never for private tabs). */

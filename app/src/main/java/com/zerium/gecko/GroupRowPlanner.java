@@ -14,8 +14,11 @@ import java.util.List;
  * shows, so the interaction model stays unit-testable without Android.</p>
  *
  * <p>Row order in the main overview: group cards in stable group-creation
- * order, then ungrouped tabs of the active space in session order, then the
- * incognito tabs (incognito tabs belong to no space and can never be grouped).
+ * order, then ungrouped tabs of the active space in session order.
+ * <b>Incognito tabs never appear here</b> — the switcher is a two-mode
+ * selector (Normal / Incognito, Chrome-style): normal mode shows only the
+ * active Space's regular tabs and groups, private mode shows only private
+ * tabs. Incognito tabs belong to no space and can never be grouped.
  * While a search filter is active the overview flattens to matching tab cards
  * only — group cards would hide their members' matches. The detail surface
  * lists exactly the members of one group in session order.</p>
@@ -46,7 +49,7 @@ public final class GroupRowPlanner {
 
     private GroupRowPlanner() {}
 
-    /** Rows for the main tab overview (grouped-card model). */
+    /** Rows for the main tab overview (grouped-card model, normal mode). */
     public static List<Row> planMain(List<Tab> tabs, TabGroups groups,
                                      String activeSpaceId, String query) {
         List<Row> rows = new ArrayList<>();
@@ -56,12 +59,8 @@ public final class GroupRowPlanner {
         List<List<Tab>> members = new ArrayList<>();
         for (int i = 0; i < gs.size(); i++) members.add(new ArrayList<Tab>());
         List<Tab> ungrouped = new ArrayList<>();
-        List<Tab> incognito = new ArrayList<>();
         for (Tab t : tabs) {
-            if (t.incognito) {
-                if (matches(t, q)) incognito.add(t);
-                continue;
-            }
+            if (t.incognito) continue; // private tabs render in private mode only
             if (activeSpaceId == null || !activeSpaceId.equals(t.spaceId)) continue;
             TabGroups.Group g = t.groupId == null ? null : groups.get(t.groupId);
             if (g != null && g.spaceId.equals(activeSpaceId)) {
@@ -75,14 +74,26 @@ public final class GroupRowPlanner {
             // Flat result list: every matching card, groups not shown.
             for (List<Tab> mem : members) rows.addAll(toRows(mem));
             rows.addAll(toRows(ungrouped));
-            rows.addAll(toRows(incognito));
             return rows;
         }
         for (int i = 0; i < gs.size(); i++) {
             if (!members.get(i).isEmpty()) rows.add(Row.of(gs.get(i)));
         }
         rows.addAll(toRows(ungrouped));
-        rows.addAll(toRows(incognito));
+        return rows;
+    }
+
+    /**
+     * Rows for the switcher's private mode: only incognito tabs, in
+     * session order. No groups ever — private tabs cannot be grouped.
+     */
+    public static List<Row> planPrivate(List<Tab> tabs, String query) {
+        List<Row> rows = new ArrayList<>();
+        String q = query == null ? "" : query.trim().toLowerCase();
+        for (Tab t : tabs) {
+            if (!t.incognito) continue;
+            if (matches(t, q)) rows.add(Row.of(t));
+        }
         return rows;
     }
 
@@ -108,6 +119,23 @@ public final class GroupRowPlanner {
             if (t.incognito || t.groupId == null) continue;
             if (g.id.equals(t.groupId)) n++;
         }
+        return n;
+    }
+
+    /** Live normal (non-incognito) tab count in a space, for the selector chip. */
+    public static int normalTabCount(List<Tab> tabs, String activeSpaceId) {
+        int n = 0;
+        String scope = activeSpaceId == null ? Spaces.DEFAULT_ID : activeSpaceId;
+        for (Tab t : tabs) {
+            if (!t.incognito && scope.equals(t.spaceId)) n++;
+        }
+        return n;
+    }
+
+    /** Live incognito tab count, for the selector chip. */
+    public static int incognitoTabCount(List<Tab> tabs) {
+        int n = 0;
+        for (Tab t : tabs) if (t.incognito) n++;
         return n;
     }
 

@@ -51,6 +51,12 @@ public class SettingsActivity extends AppCompatActivity {
         findViewById(R.id.rowEngine).setOnClickListener(v -> pickEngine());
         findViewById(R.id.rowCustomEngines).setOnClickListener(v -> editCustomEngines());
 
+        // Search suggestions (remote omnibox autocomplete; disclosure string)
+        bindSwitch(R.id.swSearchSuggest, prefs.searchSuggestions(), () -> {
+            prefs.searchSuggestions(!prefs.searchSuggestions());
+            return prefs.searchSuggestions();
+        });
+
         // Content blocking
         bindSwitch(R.id.swBlockAds, prefs.blockAds(), () -> {
             prefs.blockAds(!prefs.blockAds());

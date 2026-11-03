@@ -58,11 +58,63 @@ public class GroupRowPlannerTest {
 
         List<GroupRowPlanner.Row> rows =
                 GroupRowPlanner.planMain(tabs, groups, SP, "");
-        assertEquals(3, rows.size());
+        // Normal mode: group card, then ungrouped. Incognito tabs render in
+        // the switcher's private mode only (two-mode selector).
+        assertEquals(2, rows.size());
         assertTrue(rows.get(0).isGroup());
         assertEquals(g.id, rows.get(0).group.id);
         assertEquals(a, rows.get(1).tab);
-        assertEquals(inc, rows.get(2).tab);
+    }
+
+    @Test
+    public void privateModeShowsOnlyIncognitoTabs() {
+        TabGroups groups = new TabGroups();
+        groups.create(SP, "News", 2);
+        List<Tab> tabs = new ArrayList<>();
+        tabs.add(tab("https://a.example", SP, null));
+        Tab inc1 = new Tab(0L, null, null, true);
+        inc1.url = "https://private1.example";
+        Tab inc2 = new Tab(0L, null, null, true);
+        inc2.url = "https://private2.example";
+        tabs.add(inc1);
+        tabs.add(inc2);
+
+        List<GroupRowPlanner.Row> rows = GroupRowPlanner.planPrivate(tabs, "");
+        assertEquals(2, rows.size());
+        assertEquals(inc1, rows.get(0).tab);
+        assertEquals(inc2, rows.get(1).tab);
+        // No group cards ever: private tabs cannot be grouped.
+        assertEquals(0, groupCards(rows));
+    }
+
+    @Test
+    public void privateModeSearchFiltersAndNeverLeadsIntoGroups() {
+        TabGroups groups = new TabGroups();
+        List<Tab> tabs = new ArrayList<>();
+        Tab inc = new Tab(0L, null, null, true);
+        inc.url = "https://mail.private.example";
+        inc.title = "Private mail";
+        tabs.add(inc);
+        tabs.add(tab("https://normal.example", SP, null));
+
+        assertEquals(1, GroupRowPlanner.planPrivate(tabs, "mail").size());
+        assertEquals(0, GroupRowPlanner.planPrivate(tabs, "normal").size());
+        assertEquals(1, GroupRowPlanner.planPrivate(tabs, "").size());
+    }
+
+    @Test
+    public void selectorCountsMatchModeContents() {
+        List<Tab> tabs = new ArrayList<>();
+        tabs.add(tab("https://a.example", SP, null));
+        tabs.add(tab("https://b.example", SP, null));
+        tabs.add(tab("https://c.example", SP2, null)); // other space
+        Tab inc1 = new Tab(0L, null, null, true);
+        tabs.add(inc1);
+        Tab inc2 = new Tab(0L, null, null, true);
+        tabs.add(inc2);
+        assertEquals(2, GroupRowPlanner.normalTabCount(tabs, SP));
+        assertEquals(1, GroupRowPlanner.normalTabCount(tabs, SP2));
+        assertEquals(2, GroupRowPlanner.incognitoTabCount(tabs));
     }
 
     @Test

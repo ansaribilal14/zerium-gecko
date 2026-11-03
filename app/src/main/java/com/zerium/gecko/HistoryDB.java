@@ -32,7 +32,11 @@ public class HistoryDB extends SQLiteOpenHelper {
     public void onUpgrade(SQLiteDatabase db, int a, int b) { }
 
     public void add(String url, String title) {
-        if (url == null || !url.startsWith("http")) return;
+        // Only real navigated pages are history. Internal pages
+        // (about:blank, about:home, data:, javascript:) never get recorded,
+        // so neither the history screen nor the omnibox suggestions can
+        // ever resurface a blank/error page.
+        if (!Urls.isWebUrl(url)) return;
         ContentValues cv = new ContentValues();
         cv.put("url", url);
         cv.put("title", title == null ? "" : title);
@@ -46,6 +50,29 @@ public class HistoryDB extends SQLiteOpenHelper {
         try (Cursor c = getReadableDatabase().rawQuery(
                 "SELECT id, url, title FROM history ORDER BY ts DESC LIMIT ?",
                 new String[]{String.valueOf(limit)})) {
+            while (c.moveToNext()) {
+                out.add(new Entry(c.getLong(0), c.getString(1), c.getString(2)));
+            }
+        } catch (Exception ignored) {}
+        return out;
+    }
+
+    /**
+     * Omnibox history suggestions: newest entries whose URL or title
+     * contains the query, deduplicated by URL (newest title wins). Fully
+     * parameterized — the query string is never concatenated into SQL.
+     * Returns at most {@code limit} entries, newest first.
+     */
+    public java.util.List<Entry> suggest(String query, int limit) {
+        java.util.List<Entry> out = new java.util.ArrayList<>();
+        String q = query == null ? "" : query.trim();
+        if (q.isEmpty() || limit <= 0) return out;
+        String like = "%" + q.toLowerCase() + "%";
+        try (Cursor c = getReadableDatabase().rawQuery(
+                "SELECT MIN(id), url, MAX(title) FROM history "
+                        + "WHERE LOWER(url) LIKE ? OR LOWER(title) LIKE ? "
+                        + "GROUP BY url ORDER BY MAX(ts) DESC LIMIT ?",
+                new String[]{like, like, String.valueOf(limit)})) {
             while (c.moveToNext()) {
                 out.add(new Entry(c.getLong(0), c.getString(1), c.getString(2)));
             }

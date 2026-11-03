@@ -185,6 +185,45 @@
                             android:textSize="14sp" />
                     </LinearLayout>
 
+                    <!-- Search suggestions (remote omnibox autocomplete) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="?attr/selectableItemBackground"
+                        android:gravity="center_vertical"
+                        android:minHeight="56dp"
+                        android:orientation="horizontal"
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/settings_search_suggestions"
+                                android:textColor="?attr/colorOnSurface"
+                                android:textSize="15sp" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/settings_search_suggestions_desc"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/swSearchSuggest"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="8dp" />
+                    </LinearLayout>
+
                     <LinearLayout
                         android:id="@+id/rowCustomEngines"
                         android:layout_width="match_parent"
