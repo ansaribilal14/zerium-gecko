@@ -107,3 +107,11 @@ docs/                                 Privacy, blocking scope, roadmap
 ## License
 
 GPL-3.0, same as the Zerium Browser project. Third-party: Mozilla GeckoView (MPL-2.0), StevenBlack hosts (MIT), EasyList/EasyPrivacy-derived rules and cosmetic selectors (CC-BY-SA-3.0), Mozilla Readability (Apache-2.0) — see `docs/BLOCKING.md` and the in-repo attributions.
+
+---
+
+## Project status
+
+**Completed project** — verified in the portfolio audit of **7 November 2026** (README, codebase and project state reviewed).
+
+_Last verified: 7 November 2026_
